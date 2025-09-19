@@ -56,7 +56,6 @@ func NewChecker(db *sql.DB, interval time.Duration) *Checker {
 func (c *Checker) Start() {
 	log.Println("🔍 Запуск мониторинга сайтов...")
 	
-	// Выполняем первую проверку сразу
 	log.Println("▶️ Выполняем первичную проверку всех сайтов...")
 	c.checkAllSites()
 	
@@ -99,7 +98,6 @@ func (c *Checker) checkAllSites() {
 		c.updateSiteStatus(&site, result)
 		c.saveCheckHistory(site.ID, result)
 		
-		// Небольшая пауза между проверками
 		time.Sleep(500 * time.Millisecond)
 	}
 	
@@ -115,7 +113,6 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		SSLValid:   false,
 	}
 
-	// Проверяем SSL сертификат для HTTPS сайтов
 	if strings.HasPrefix(siteURL, "https://") {
 		log.Printf("🔒 Проверяем SSL для: %s", siteURL)
 		result.SSLValid, result.SSLExpiry = c.checkSSL(siteURL)
@@ -126,7 +123,6 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		}
 	}
 
-	// Выполняем HTTP запрос
 	log.Printf("📡 Выполняем HTTP запрос к: %s", siteURL)
 	resp, err := c.client.Get(siteURL)
 	if err != nil {
@@ -140,14 +136,12 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 	result.ResponseTime = time.Since(start).Milliseconds()
 	result.StatusCode = resp.StatusCode
 
-	// Читаем содержимое для определения размера
 	body, err := io.ReadAll(resp.Body)
 	if err == nil {
 		result.ContentLength = int64(len(body))
 		log.Printf("📄 Размер контента %s: %d байт", siteURL, result.ContentLength)
 	}
 
-	// Определяем статус на основе кода ответа
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		result.Status = "up"
 		log.Printf("✅ Сайт %s доступен (код: %d, время: %dмс, размер: %d байт)", 
@@ -198,7 +192,6 @@ func (c *Checker) checkSSL(siteURL string) (bool, *time.Time) {
 	
 	log.Printf("🔍 SSL сертификат для %s: выдан до %v", siteURL, cert.NotAfter)
 	
-	// Проверяем валидность сертификата
 	if now.After(cert.NotAfter) || now.Before(cert.NotBefore) {
 		log.Printf("⚠️ SSL сертификат для %s истек или еще не действует", siteURL)
 		return false, &cert.NotAfter
@@ -211,7 +204,6 @@ func (c *Checker) checkSSL(siteURL string) (bool, *time.Time) {
 func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 	log.Printf("💾 Обновляем статус сайта %s: %s", site.URL, result.Status)
 	
-	// Обновляем основную информацию о сайте - исправляем SQL запрос
 	query := `UPDATE sites SET 
                 status = $1::varchar, 
                 status_code = $2, 
@@ -239,6 +231,9 @@ func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 		log.Printf("❌ Ошибка обновления статуса сайта %s: %v", site.URL, err)
 	} else {
 		log.Printf("✅ Статус сайта %s успешно обновлен", site.URL)
+		
+		// Отправляем SSE уведомление о проверке сайта
+		NotifySiteChecked(site.URL, result)
 	}
 }
 
@@ -258,3 +253,6 @@ func StartMonitoring(db *sql.DB, interval time.Duration) {
 	checker := NewChecker(db, interval)
 	checker.Start()
 }
+
+// Функция для отправки уведомлений (будет импортирована из handlers)
+var NotifySiteChecked func(string, CheckResult)

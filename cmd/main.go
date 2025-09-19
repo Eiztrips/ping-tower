@@ -29,10 +29,21 @@ func main() {
     }
     defer db.Close()
 
+    // Настраиваем связь между модулями для SSE уведомлений
+    monitor.NotifySiteChecked = func(url string, result monitor.CheckResult) {
+        handlers.BroadcastSSE("site_checked", map[string]interface{}{
+            "url": url,
+            "status": result.Status,
+            "status_code": result.StatusCode,
+            "response_time": result.ResponseTime,
+			"ssl_valid": result.SSLValid,
+            "timestamp": time.Now().Format(time.RFC3339),
+        })
+    }
+
     r := mux.NewRouter()
     handlers.RegisterRoutes(r, db)
 
-    // Дожидаемся полной инициализации БД перед запуском мониторинга
     time.Sleep(2 * time.Second)
     
     log.Printf("🔍 Запуск мониторинга с интервалом %v", cfg.CheckInterval)

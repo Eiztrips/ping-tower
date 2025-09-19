@@ -192,7 +192,6 @@ func (db *DB) DeleteSite(url string) error {
 }
 
 func (db *DB) runMigrations() error {
-    // Create migrations table to track applied migrations
     _, err := db.Exec(`
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY,
@@ -203,7 +202,6 @@ func (db *DB) runMigrations() error {
         return fmt.Errorf("ошибка создания таблицы миграций: %w", err)
     }
 
-    // Migration 1: Create basic sites table
     if !db.isMigrationApplied(1) {
         err = db.applyMigration1()
         if err != nil {
@@ -212,7 +210,6 @@ func (db *DB) runMigrations() error {
         db.markMigrationApplied(1)
     }
 
-    // Migration 2: Add enhanced monitoring fields
     if !db.isMigrationApplied(2) {
         err = db.applyMigration2()
         if err != nil {
@@ -264,7 +261,6 @@ func (db *DB) applyMigration1() error {
 }
 
 func (db *DB) applyMigration2() error {
-    // Check if columns already exist before adding them
     query := `
     -- Add new columns for enhanced monitoring
     DO $$ 
@@ -352,7 +348,6 @@ func (db *DB) UpdateSiteStatus(id int, status string) error {
 
 func (db *DB) TriggerCheck() error {
     log.Println("🔄 Принудительный запуск проверки всех сайтов")
-    // Обновляем время последней проверки для всех сайтов, чтобы инициировать проверку
     _, err := db.Exec("UPDATE sites SET last_checked = last_checked - INTERVAL '1 hour'")
     return err
 }

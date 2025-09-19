@@ -22,7 +22,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	port := getEnv("PORT", "8080")
-	checkIntervalStr := getEnv("CHECK_INTERVAL", "10") // Уменьшили с 30 до 10 секунд для тестирования
+	checkIntervalStr := getEnv("CHECK_INTERVAL", "10")
 	checkIntervalInt, err := strconv.Atoi(checkIntervalStr)
 	if err != nil {
 		checkIntervalInt = 10

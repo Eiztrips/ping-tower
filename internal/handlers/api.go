@@ -6,6 +6,7 @@ import (
 	"site-monitor/internal/database"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -36,6 +37,18 @@ type DashboardStats struct {
 	AvgResponseTime float64 `json:"avg_response_time"`
 }
 
+type SSEMessage struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
+var sseClients = make(map[chan SSEMessage]bool)
+var sseClientsMutex = make(chan bool, 1)
+
+func init() {
+	sseClientsMutex <- true
+}
+
 func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
@@ -45,6 +58,71 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/api/sites/{id}/history", GetSiteHistoryHandler(db)).Methods("GET")
 	r.HandleFunc("/api/dashboard/stats", GetDashboardStatsHandler(db)).Methods("GET")
 	r.HandleFunc("/api/check", TriggerCheckHandler(db)).Methods("POST")
+	r.HandleFunc("/api/sse", SSEHandler()).Methods("GET")
+}
+
+func SSEHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		clientChan := make(chan SSEMessage, 10)
+		
+		<-sseClientsMutex
+		sseClients[clientChan] = true
+		sseClientsMutex <- true
+		
+		defer func() {
+			<-sseClientsMutex
+			delete(sseClients, clientChan)
+			sseClientsMutex <- true
+			close(clientChan)
+		}()
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+			return
+		}
+
+		// Отправляем начальное сообщение
+		fmt.Fprintf(w, "data: %s\n\n", `{"type":"connected","data":{"message":"Connected to SSE"}}`)
+		flusher.Flush()
+
+		for {
+			select {
+			case msg := <-clientChan:
+				data, _ := json.Marshal(msg)
+				fmt.Fprintf(w, "data: %s\n\n", string(data))
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			case <-time.After(30 * time.Second):
+				// Keepalive ping
+				fmt.Fprintf(w, "data: %s\n\n", `{"type":"ping","data":{"timestamp":"`+time.Now().Format(time.RFC3339)+`"}}`)
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+func BroadcastSSE(msgType string, data interface{}) {
+	message := SSEMessage{
+		Type: msgType,
+		Data: data,
+	}
+	
+	<-sseClientsMutex
+	for client := range sseClients {
+		select {
+		case client <- message:
+		default:
+			// Клиент не может принять сообщение, пропускаем
+		}
+	}
+	sseClientsMutex <- true
 }
 
 func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
@@ -56,6 +134,9 @@ func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Ошибка запуска проверки"})
 			return
 		}
+
+		// Уведомляем клиентов о начале проверки
+		BroadcastSSE("check_started", map[string]string{"message": "Проверка запущена"})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(SuccessResponse{Message: "Проверка инициирована"})
@@ -87,6 +168,9 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
+		// Уведомляем клиентов о добавлении нового сайта
+		BroadcastSSE("site_added", map[string]string{"url": req.URL})
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(SuccessResponse{Message: "Сайт успешно добавлен для мониторинга"})
@@ -108,7 +192,6 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 
 		log.Printf("✅ Успешно получен список из %d сайтов", len(sites))
 		
-		// Логируем первый сайт для отладки
 		if len(sites) > 0 {
 			log.Printf("🔍 Первый сайт: ID=%d, URL=%s, Status=%s", 
 				sites[0].ID, sites[0].URL, sites[0].Status)
@@ -131,6 +214,9 @@ func DeleteSiteHandler(db *database.DB) http.HandlerFunc {
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Сайт не найден"})
 			return
 		}
+
+		// Уведомляем клиентов об удалении сайта
+		BroadcastSSE("site_deleted", map[string]string{"url": url})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(SuccessResponse{Message: "Сайт удален из мониторинга"})
@@ -188,7 +274,6 @@ func GetSiteHistoryHandler(db *database.DB) http.HandlerFunc {
 		vars := mux.Vars(r)
 		siteID := vars["id"]
 
-		// Convert string to int
 		var id int
 		if _, err := fmt.Sscanf(siteID, "%d", &id); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -214,14 +299,12 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		stats := DashboardStats{}
 		
-		// First, get basic count
 		countQuery := `SELECT COUNT(*) FROM sites`
 		err := db.QueryRow(countQuery).Scan(&stats.TotalSites)
 		if err != nil {
 			log.Printf("Ошибка получения количества сайтов: %v", err)
 		}
 		
-		// Get detailed stats only if we have sites
 		if stats.TotalSites > 0 {
 			statsQuery := `SELECT 
 							COUNT(CASE WHEN status = 'up' THEN 1 END) as up,
@@ -233,7 +316,6 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 			err = db.QueryRow(statsQuery).Scan(&stats.SitesUp, &stats.SitesDown, &stats.AvgUptime, &stats.AvgResponseTime)
 			if err != nil {
 				log.Printf("Ошибка получения детальной статистики: %v", err)
-				// Set default values on error
 				stats.SitesUp = 0
 				stats.SitesDown = 0
 				stats.AvgUptime = 0.0

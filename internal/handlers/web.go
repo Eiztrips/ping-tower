@@ -407,6 +407,110 @@ const webTemplate = `<!DOCTYPE html>
 
     <script>
         let statusChart = null;
+        let eventSource = null;
+        
+        // Подключаемся к Server-Sent Events
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            eventSource = new EventSource('/api/sse');
+            
+            eventSource.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleSSEMessage(message);
+                } catch (error) {
+                    console.error('Ошибка парсинга SSE сообщения:', error);
+                }
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error('SSE connection error:', event);
+                // Переподключаемся через 5 секунд
+                setTimeout(connectSSE, 5000);
+            };
+            
+            eventSource.onopen = function(event) {
+                console.log('SSE подключение установлено');
+            };
+        }
+        
+        function handleSSEMessage(message) {
+            console.log('SSE сообщение:', message);
+            
+            switch (message.type) {
+                case 'site_checked':
+                    console.log('Сайт проверен:', message.data);
+                    loadSites();
+                    loadDashboardStats();
+                    showNotification('Проверен сайт: ' + message.data.url + ' - ' + message.data.status.toUpperCase(), 
+                        message.data.status === 'up' ? 'success' : 'error');
+                    break;
+                case 'site_added':
+                    console.log('Сайт добавлен:', message.data);
+                    loadSites();
+                    loadDashboardStats();
+                    showNotification('Добавлен сайт: ' + message.data.url, 'success');
+                    break;
+                case 'site_deleted':
+                    console.log('Сайт удален:', message.data);
+                    loadSites();
+                    loadDashboardStats();
+                    showNotification('Удален сайт: ' + message.data.url, 'warning');
+                    break;
+                case 'check_started':
+                    console.log('Проверка запущена');
+                    showNotification('Проверка всех сайтов запущена', 'info');
+                    break;
+            }
+        }
+        
+        function showNotification(message, type) {
+            type = type || 'info';
+            const notification = document.createElement('div');
+            notification.style.cssText = 
+                'position: fixed;' +
+                'top: 20px;' +
+                'right: 20px;' +
+                'padding: 15px 20px;' +
+                'border-radius: 10px;' +
+                'color: white;' +
+                'font-weight: bold;' +
+                'z-index: 9999;' +
+                'opacity: 0;' +
+                'transition: opacity 0.3s ease;' +
+                'max-width: 300px;' +
+                'word-wrap: break-word;';
+            
+            const colors = {
+                success: '#27ae60',
+                error: '#e74c3c',
+                warning: '#f39c12',
+                info: '#3498db'
+            };
+            
+            notification.style.backgroundColor = colors[type] || colors.info;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            // Анимация появления
+            setTimeout(function() {
+                notification.style.opacity = '1';
+            }, 100);
+            
+            // Автоматическое удаление
+            setTimeout(function() {
+                notification.style.opacity = '0';
+                setTimeout(function() {
+                    if (document.body.contains(notification)) {
+                        document.body.removeChild(notification);
+                    }
+                }, 300);
+            }, 4000);
+        }
         
         function formatTime(ms) {
             if (ms < 1000) return ms + 'мс';
@@ -438,7 +542,6 @@ const webTemplate = `<!DOCTYPE html>
                 })
                 .catch(error => {
                     console.error('Ошибка загрузки статистики:', error);
-                    // Set default values on error
                     document.getElementById('sitesUp').textContent = '0';
                     document.getElementById('sitesDown').textContent = '0';
                     document.getElementById('avgUptime').textContent = '0.0%';
@@ -540,19 +643,21 @@ const webTemplate = `<!DOCTYPE html>
                 },
                 body: JSON.stringify({ url: url })
             })
-            .then(response => response.json())
-            .then(data => {
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
                 if (data.message) {
                     document.getElementById('url').value = '';
-                    loadSites();
-                    loadDashboardStats();
+                    // Не вызываем loadSites() и loadDashboardStats() здесь,
+                    // потому что они будут вызваны через SSE
                 } else if (data.error) {
-                    alert('Ошибка: ' + data.error);
+                    showNotification('Ошибка: ' + data.error, 'error');
                 }
             })
-            .catch(error => {
+            .catch(function(error) {
                 console.error('Ошибка добавления сайта:', error);
-                alert('Ошибка добавления сайта');
+                showNotification('Ошибка добавления сайта', 'error');
             });
         });
 
@@ -561,18 +666,18 @@ const webTemplate = `<!DOCTYPE html>
                 fetch('/api/sites/' + encodeURIComponent(url), {
                     method: 'DELETE'
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        loadSites();
-                        loadDashboardStats();
-                    } else if (data.error) {
-                        alert('Ошибка: ' + data.error);
-                    }
+                .then(function(response) {
+                    return response.json();
                 })
-                .catch(error => {
+                .then(function(data) {
+                    if (data.error) {
+                        showNotification('Ошибка: ' + data.error, 'error');
+                    }
+                    // Успешное удаление будет обработано через SSE
+                })
+                .catch(function(error) {
                     console.error('Ошибка удаления сайта:', error);
-                    alert('Ошибка удаления сайта');
+                    showNotification('Ошибка удаления сайта', 'error');
                 });
             }
         }
@@ -581,34 +686,32 @@ const webTemplate = `<!DOCTYPE html>
             fetch('/api/check', {
                 method: 'POST'
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    alert('Проверка запущена! Данные обновятся через несколько секунд.');
-                    // Обновляем данные через 3 секунды
-                    setTimeout(() => {
-                        loadSites();
-                        loadDashboardStats();
-                    }, 3000);
-                } else if (data.error) {
-                    alert('Ошибка: ' + data.error);
-                }
+            .then(function(response) {
+                return response.json();
             })
-            .catch(error => {
+            .then(function(data) {
+                if (data.error) {
+                    showNotification('Ошибка: ' + data.error, 'error');
+                }
+                // Уведомление о запуске будет показано через SSE
+            })
+            .catch(function(error) {
                 console.error('Ошибка запуска проверки:', error);
-                alert('Ошибка запуска проверки');
+                showNotification('Ошибка запуска проверки', 'error');
             });
         }
 
-        // Загружаем данные при загрузке страницы
+        // Подключаемся к SSE при загрузке страницы
+        connectSSE();
+        
         loadDashboardStats();
         loadSites();
         
-        // Обновляем данные каждые 30 секунд
-        setInterval(() => {
-            loadDashboardStats();
-            loadSites();
-        }, 30000);
+        // Убираем автоматическое обновление по таймеру, так как теперь используем SSE
+        // setInterval(function() {
+        //     loadDashboardStats();
+        //     loadSites();
+        // }, 30000);
     </script>
 </body>
 </html>`
