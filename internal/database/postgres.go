@@ -115,35 +115,36 @@ func (db *DB) DeleteSite(url string) error {
     return nil
 }
 
-func (db *DB) runMigrations() error {
-    createTableSQL := `
-    -- Create sites table for monitoring websites
-    CREATE TABLE IF NOT EXISTS sites (
-        id SERIAL PRIMARY KEY,
-        url VARCHAR(255) NOT NULL UNIQUE,
-        status VARCHAR(20) NOT NULL DEFAULT 'unknown',
-        last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+// USE DOCKER DB INIT
+// func (db *DB) runMigrations() error {
+//     createTableSQL := `
+//     -- Create sites table for monitoring websites
+//     CREATE TABLE IF NOT EXISTS sites (
+//         id SERIAL PRIMARY KEY,
+//         url VARCHAR(255) NOT NULL UNIQUE,
+//         status VARCHAR(20) NOT NULL DEFAULT 'unknown',
+//         last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+//         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+//         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+//     );
 
-    -- Create index for faster URL lookups
-    CREATE INDEX IF NOT EXISTS idx_sites_url ON sites(url);
+//     -- Create index for faster URL lookups
+//     CREATE INDEX IF NOT EXISTS idx_sites_url ON sites(url);
 
-    -- Insert some sample data
-    INSERT INTO sites (url) VALUES 
-        ('https://google.com'),
-        ('https://github.com') 
-    ON CONFLICT (url) DO NOTHING;`
+//     -- Insert some sample data
+//     INSERT INTO sites (url) VALUES 
+//         ('https://google.com'),
+//         ('https://github.com') 
+//     ON CONFLICT (url) DO NOTHING;`
 
-    _, err := db.Exec(createTableSQL)
-    if err != nil {
-        return fmt.Errorf("ошибка выполнения миграции: %w", err)
-    }
+//     _, err := db.Exec(createTableSQL)
+//     if err != nil {
+//         return fmt.Errorf("ошибка выполнения миграции: %w", err)
+//     }
 
-    log.Println("Миграции выполнены успешно")
-    return nil
-}
+//     log.Println("Миграции выполнены успешно")
+//     return nil
+// }
 
 func (db *DB) UpdateSiteStatus(id int, status string) error {
     query := "UPDATE sites SET status = $1, last_checked = CURRENT_TIMESTAMP WHERE id = $2"
