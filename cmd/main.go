@@ -23,6 +23,9 @@ func main() {
     }
     defer db.Close()
 
+    r := mux.NewRouter()
+    handlers.RegisterRoutes(r, db)
+
     go monitor.StartMonitoring(db.DB, cfg.CheckInterval)
     
     log.Printf("Сервер запущен на %s", cfg.ServerAddress)

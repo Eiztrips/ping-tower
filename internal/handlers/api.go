@@ -27,7 +27,7 @@ type SuccessResponse struct {
 }
 
 func RegisterRoutes(r *mux.Router, db *database.DB) {
-	r.HandleFunc("/", handlers.WebInterfaceHandler()).Methods("GET")
+	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
 	r.HandleFunc("/api/sites", GetAllSitesHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{url}/status", GetSiteStatusHandler(db)).Methods("GET")
