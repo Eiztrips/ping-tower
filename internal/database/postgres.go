@@ -47,13 +47,39 @@ func (db *DB) Close() error {
 
 func (db *DB) GetSiteByURL(url string) (*models.Site, error) {
     var site models.Site
-    query := "SELECT id, url, status, last_checked FROM sites WHERE url = $1"
-    err := db.QueryRow(query, url).Scan(&site.ID, &site.URL, &site.Status, &site.LastChecked)
+    var sslExpiry sql.NullTime
+    query := `SELECT id, url, status, 
+              COALESCE(status_code, 0) as status_code,
+              COALESCE(response_time, 0) as response_time,
+              COALESCE(content_length, 0) as content_length,
+              COALESCE(ssl_valid, false) as ssl_valid,
+              ssl_expiry,
+              COALESCE(last_error, '') as last_error,
+              COALESCE(total_checks, 0) as total_checks,
+              COALESCE(successful_checks, 0) as successful_checks,
+              CASE 
+                  WHEN COALESCE(total_checks, 0) > 0 THEN (COALESCE(successful_checks, 0)::float / COALESCE(total_checks, 1)::float * 100)
+                  ELSE 0 
+              END as uptime_percent,
+              COALESCE(last_checked, created_at) as last_checked,
+              created_at
+              FROM sites WHERE url = $1`
+    
+    err := db.QueryRow(query, url).Scan(
+        &site.ID, &site.URL, &site.Status, &site.StatusCode, &site.ResponseTime,
+        &site.ContentLength, &site.SSLValid, &sslExpiry, &site.LastError,
+        &site.TotalChecks, &site.SuccessfulChecks, &site.UptimePercent,
+        &site.LastChecked, &site.CreatedAt)
+    
     if err != nil {
         if err == sql.ErrNoRows {
             return nil, fmt.Errorf("Сайт не найден")
         }
         return nil, fmt.Errorf("Ошибка запроса к сайту: %w", err)
+    }
+    
+    if sslExpiry.Valid {
+        site.SSLExpiry = &sslExpiry.Time
     }
 
     return &site, nil
@@ -71,7 +97,25 @@ func (db *DB) AddSite(url string) error {
 }
 
 func (db *DB) GetAllSites() ([]models.Site, error) {
-    query := "SELECT id, url, status, last_checked FROM sites ORDER BY created_at DESC"
+    query := `SELECT 
+                id, url, status, 
+                COALESCE(status_code, 0) as status_code, 
+                COALESCE(response_time, 0) as response_time, 
+                COALESCE(content_length, 0) as content_length, 
+                COALESCE(ssl_valid, false) as ssl_valid, 
+                ssl_expiry, 
+                COALESCE(last_error, '') as last_error, 
+                COALESCE(total_checks, 0) as total_checks, 
+                COALESCE(successful_checks, 0) as successful_checks,
+                CASE 
+                    WHEN COALESCE(total_checks, 0) > 0 THEN (COALESCE(successful_checks, 0)::float / COALESCE(total_checks, 1)::float * 100)
+                    ELSE 0 
+                END as uptime_percent,
+                COALESCE(last_checked, created_at) as last_checked, 
+                created_at 
+              FROM sites 
+              ORDER BY created_at DESC`
+    
     rows, err := db.Query(query)
     if err != nil {
         return nil, fmt.Errorf("Ошибка получения списка сайтов: %w", err)
@@ -81,18 +125,50 @@ func (db *DB) GetAllSites() ([]models.Site, error) {
     var sites []models.Site
     for rows.Next() {
         var site models.Site
-        err := rows.Scan(&site.ID, &site.URL, &site.Status, &site.LastChecked)
+        var sslExpiry sql.NullTime
+        err := rows.Scan(
+            &site.ID, &site.URL, &site.Status, &site.StatusCode, &site.ResponseTime,
+            &site.ContentLength, &site.SSLValid, &sslExpiry, &site.LastError,
+            &site.TotalChecks, &site.SuccessfulChecks, &site.UptimePercent,
+            &site.LastChecked, &site.CreatedAt)
         if err != nil {
             return nil, fmt.Errorf("Ошибка чтения данных сайта: %w", err)
         }
+        
+        if sslExpiry.Valid {
+            site.SSLExpiry = &sslExpiry.Time
+        }
+        
         sites = append(sites, site)
     }
 
-    if err = rows.Err(); err != nil {
-        return nil, fmt.Errorf("Ошибка при обработке результатов: %w", err)
+    return sites, nil
+}
+
+func (db *DB) GetSiteHistory(siteID int, limit int) ([]models.SiteHistory, error) {
+    query := `SELECT id, site_id, status, status_code, response_time, error, checked_at 
+              FROM site_history 
+              WHERE site_id = $1 
+              ORDER BY checked_at DESC 
+              LIMIT $2`
+    
+    rows, err := db.Query(query, siteID, limit)
+    if err != nil {
+        return nil, fmt.Errorf("Ошибка получения истории сайта: %w", err)
+    }
+    defer rows.Close()
+
+    var history []models.SiteHistory
+    for rows.Next() {
+        var h models.SiteHistory
+        err := rows.Scan(&h.ID, &h.SiteID, &h.Status, &h.StatusCode, &h.ResponseTime, &h.Error, &h.CheckedAt)
+        if err != nil {
+            return nil, fmt.Errorf("Ошибка чтения истории: %w", err)
+        }
+        history = append(history, h)
     }
 
-    return sites, nil
+    return history, nil
 }
 
 func (db *DB) DeleteSite(url string) error {
@@ -115,42 +191,168 @@ func (db *DB) DeleteSite(url string) error {
     return nil
 }
 
-// USE DOCKER DB INIT
-// func (db *DB) runMigrations() error {
-//     createTableSQL := `
-//     -- Create sites table for monitoring websites
-//     CREATE TABLE IF NOT EXISTS sites (
-//         id SERIAL PRIMARY KEY,
-//         url VARCHAR(255) NOT NULL UNIQUE,
-//         status VARCHAR(20) NOT NULL DEFAULT 'unknown',
-//         last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-//         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-//         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-//     );
+func (db *DB) runMigrations() error {
+    // Create migrations table to track applied migrations
+    _, err := db.Exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `)
+    if err != nil {
+        return fmt.Errorf("ошибка создания таблицы миграций: %w", err)
+    }
 
-//     -- Create index for faster URL lookups
-//     CREATE INDEX IF NOT EXISTS idx_sites_url ON sites(url);
+    // Migration 1: Create basic sites table
+    if !db.isMigrationApplied(1) {
+        err = db.applyMigration1()
+        if err != nil {
+            return fmt.Errorf("ошибка применения миграции 1: %w", err)
+        }
+        db.markMigrationApplied(1)
+    }
 
-//     -- Insert some sample data
-//     INSERT INTO sites (url) VALUES 
-//         ('https://google.com'),
-//         ('https://github.com') 
-//     ON CONFLICT (url) DO NOTHING;`
+    // Migration 2: Add enhanced monitoring fields
+    if !db.isMigrationApplied(2) {
+        err = db.applyMigration2()
+        if err != nil {
+            return fmt.Errorf("ошибка применения миграции 2: %w", err)
+        }
+        db.markMigrationApplied(2)
+    }
 
-//     _, err := db.Exec(createTableSQL)
-//     if err != nil {
-//         return fmt.Errorf("ошибка выполнения миграции: %w", err)
-//     }
+    log.Println("Миграции выполнены успешно")
+    return nil
+}
 
-//     log.Println("Миграции выполнены успешно")
-//     return nil
-// }
+func (db *DB) isMigrationApplied(version int) bool {
+    var count int
+    err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = $1", version).Scan(&count)
+    return err == nil && count > 0
+}
+
+func (db *DB) markMigrationApplied(version int) {
+    db.Exec("INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING", version)
+}
+
+func (db *DB) applyMigration1() error {
+    query := `
+    -- Create basic sites table
+    CREATE TABLE IF NOT EXISTS sites (
+        id SERIAL PRIMARY KEY,
+        url VARCHAR(255) NOT NULL UNIQUE,
+        status VARCHAR(20) NOT NULL DEFAULT 'unknown',
+        last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Insert sample data
+    INSERT INTO sites (url) VALUES 
+        ('https://google.com'),
+        ('https://github.com') 
+    ON CONFLICT (url) DO NOTHING;
+    `
+    
+    _, err := db.Exec(query)
+    if err != nil {
+        return fmt.Errorf("ошибка выполнения миграции 1: %w", err)
+    }
+    
+    log.Println("Миграция 1 выполнена: базовая таблица sites создана")
+    return nil
+}
+
+func (db *DB) applyMigration2() error {
+    // Check if columns already exist before adding them
+    query := `
+    -- Add new columns for enhanced monitoring
+    DO $$ 
+    BEGIN
+        -- Add status_code column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'status_code') THEN
+            ALTER TABLE sites ADD COLUMN status_code INTEGER DEFAULT 0;
+        END IF;
+        
+        -- Add response_time column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'response_time') THEN
+            ALTER TABLE sites ADD COLUMN response_time BIGINT DEFAULT 0;
+        END IF;
+        
+        -- Add content_length column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'content_length') THEN
+            ALTER TABLE sites ADD COLUMN content_length BIGINT DEFAULT 0;
+        END IF;
+        
+        -- Add ssl_valid column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_valid') THEN
+            ALTER TABLE sites ADD COLUMN ssl_valid BOOLEAN DEFAULT FALSE;
+        END IF;
+        
+        -- Add ssl_expiry column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_expiry') THEN
+            ALTER TABLE sites ADD COLUMN ssl_expiry TIMESTAMP NULL;
+        END IF;
+        
+        -- Add last_error column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'last_error') THEN
+            ALTER TABLE sites ADD COLUMN last_error TEXT DEFAULT '';
+        END IF;
+        
+        -- Add total_checks column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'total_checks') THEN
+            ALTER TABLE sites ADD COLUMN total_checks INTEGER DEFAULT 0;
+        END IF;
+        
+        -- Add successful_checks column
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'successful_checks') THEN
+            ALTER TABLE sites ADD COLUMN successful_checks INTEGER DEFAULT 0;
+        END IF;
+    END $$;
+
+    -- Create history table for tracking all checks
+    CREATE TABLE IF NOT EXISTS site_history (
+        id SERIAL PRIMARY KEY,
+        site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
+        status VARCHAR(20) NOT NULL,
+        status_code INTEGER DEFAULT 0,
+        response_time BIGINT DEFAULT 0,
+        error TEXT DEFAULT '',
+        checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create additional indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_sites_status ON sites(status);
+    CREATE INDEX IF NOT EXISTS idx_history_site_id ON site_history(site_id);
+    CREATE INDEX IF NOT EXISTS idx_history_checked_at ON site_history(checked_at);
+    `
+
+    _, err := db.Exec(query)
+    if err != nil {
+        return fmt.Errorf("ошибка выполнения миграции 2: %w", err)
+    }
+    
+    log.Println("Миграция 2 выполнена: добавлены поля для расширенного мониторинга")
+    return nil
+}
 
 func (db *DB) UpdateSiteStatus(id int, status string) error {
-    query := "UPDATE sites SET status = $1, last_checked = CURRENT_TIMESTAMP WHERE id = $2"
+    query := `UPDATE sites SET 
+                status = $1::varchar, 
+                last_checked = CURRENT_TIMESTAMP,
+                total_checks = COALESCE(total_checks, 0) + 1,
+                successful_checks = COALESCE(successful_checks, 0) + CASE WHEN $1::varchar = 'up' THEN 1 ELSE 0 END
+              WHERE id = $2`
     _, err := db.Exec(query, status, id)
     if err != nil {
         return fmt.Errorf("Ошибка обновления статуса сайта: %w", err)
     }
     return nil
+}
+
+func (db *DB) TriggerCheck() error {
+    log.Println("🔄 Принудительный запуск проверки всех сайтов")
+    // Обновляем время последней проверки для всех сайтов, чтобы инициировать проверку
+    _, err := db.Exec("UPDATE sites SET last_checked = last_checked - INTERVAL '1 hour'")
+    return err
 }
