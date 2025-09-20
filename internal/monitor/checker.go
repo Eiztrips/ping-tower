@@ -100,6 +100,45 @@ func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	}
 }
 
+// CheckAllSitesScheduled - метод для вызова из планировщика заданий
+func (c *Checker) CheckAllSitesScheduled() error {
+	log.Println("📅 Запуск запланированной проверки всех сайтов...")
+	
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ Паника при запланированной проверке: %v", r)
+		}
+	}()
+
+	c.checkAllSites()
+	log.Println("✅ Запланированная проверка всех сайтов завершена")
+	return nil
+}
+
+// CheckSiteScheduled - метод для проверки конкретного сайта по расписанию
+func (c *Checker) CheckSiteScheduled(siteID int, siteURL string) error {
+	log.Printf("📅 Запуск запланированной проверки сайта: %s", siteURL)
+	
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ Паника при проверке сайта %s: %v", siteURL, r)
+		}
+	}()
+
+	result := c.checkSite(siteURL, siteID)
+	
+	if NotifySiteChecked != nil {
+		NotifySiteChecked(siteURL, result)
+	}
+
+	if MetricsRecorder != nil {
+		MetricsRecorder(siteID, siteURL, result, "scheduled")
+	}
+	
+	log.Printf("✅ Запланированная проверка сайта %s завершена: %s", siteURL, result.Status)
+	return nil
+}
+
 func (c *Checker) CheckAllSitesOnDemand() {
 	log.Println("🔍 Запуск проверки по требованию...")
 	c.checkAllSites()
@@ -702,3 +741,17 @@ func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 
 var NotifySiteChecked func(string, CheckResult)
 var MetricsRecorder func(int, string, CheckResult, string)
+
+// CreateSiteMonitoringJob создает задание для мониторинга конкретного сайта
+func CreateSiteMonitoringJob(siteID int, siteURL string, checker *Checker) func() error {
+	return func() error {
+		return checker.CheckSiteScheduled(siteID, siteURL)
+	}
+}
+
+// CreateGlobalMonitoringJob создает задание для проверки всех сайтов
+func CreateGlobalMonitoringJob(checker *Checker) func() error {
+	return func() error {
+		return checker.CheckAllSitesScheduled()
+	}
+}

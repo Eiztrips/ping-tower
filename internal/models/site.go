@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -42,6 +43,8 @@ type Site struct {
 type SiteConfig struct {
 	SiteID           int                    `json:"site_id"`
 	CheckInterval    int                    `json:"check_interval"`
+	CronSchedule     string                 `json:"cron_schedule"`     // Новое поле для cron выражений
+	ScheduleEnabled  bool                   `json:"schedule_enabled"`  // Включен ли планировщик
 	Timeout          int                    `json:"timeout"`
 	ExpectedStatus   int                    `json:"expected_status"`
 	FollowRedirects  bool                   `json:"follow_redirects"`
@@ -77,6 +80,65 @@ type SiteConfig struct {
 	
 	CreatedAt        time.Time              `json:"created_at"`
 	UpdatedAt        time.Time              `json:"updated_at"`
+}
+
+// GetEffectiveSchedule возвращает эффективное расписание (cron или интервал)
+func (sc *SiteConfig) GetEffectiveSchedule() string {
+	if sc.ScheduleEnabled && sc.CronSchedule != "" {
+		return sc.CronSchedule
+	}
+	
+	// Конвертируем интервал в cron-выражение
+	if sc.CheckInterval <= 0 {
+		sc.CheckInterval = 300 // 5 минут по умолчанию
+	}
+	
+	if sc.CheckInterval < 60 {
+		// Для интервалов менее минуты используем каждую минуту
+		return "* * * * *"
+	}
+	
+	minutes := sc.CheckInterval / 60
+	if minutes >= 60 {
+		hours := minutes / 60
+		if hours >= 24 {
+			// Раз в день
+			return "0 0 * * *"
+		}
+		// Каждые N часов
+		return fmt.Sprintf("0 */%d * * *", hours)
+	}
+	
+	// Каждые N минут
+	return fmt.Sprintf("*/%d * * * *", minutes)
+}
+
+// GetScheduleDescription возвращает человекочитаемое описание расписания
+func (sc *SiteConfig) GetScheduleDescription() string {
+	if sc.ScheduleEnabled && sc.CronSchedule != "" {
+		return fmt.Sprintf("По расписанию: %s", sc.CronSchedule)
+	}
+	
+	if sc.CheckInterval <= 0 {
+		return "Не настроено"
+	}
+	
+	if sc.CheckInterval < 60 {
+		return fmt.Sprintf("Каждые %d секунд", sc.CheckInterval)
+	}
+	
+	minutes := sc.CheckInterval / 60
+	if minutes < 60 {
+		return fmt.Sprintf("Каждые %d минут", minutes)
+	}
+	
+	hours := minutes / 60
+	if hours < 24 {
+		return fmt.Sprintf("Каждые %d часов", hours)
+	}
+	
+	days := hours / 24
+	return fmt.Sprintf("Каждые %d дней", days)
 }
 
 type SiteHistory struct {
