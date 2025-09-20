@@ -87,7 +87,6 @@ func SSEHandler() http.HandlerFunc {
 			return
 		}
 
-		// Отправляем начальное сообщение
 		fmt.Fprintf(w, "data: %s\n\n", `{"type":"connected","data":{"message":"Connected to SSE"}}`)
 		flusher.Flush()
 
@@ -100,7 +99,6 @@ func SSEHandler() http.HandlerFunc {
 			case <-r.Context().Done():
 				return
 			case <-time.After(30 * time.Second):
-				// Keepalive ping
 				fmt.Fprintf(w, "data: %s\n\n", `{"type":"ping","data":{"timestamp":"`+time.Now().Format(time.RFC3339)+`"}}`)
 				flusher.Flush()
 			}
@@ -119,7 +117,6 @@ func BroadcastSSE(msgType string, data interface{}) {
 		select {
 		case client <- message:
 		default:
-			// Клиент не может принять сообщение, пропускаем
 		}
 	}
 	sseClientsMutex <- true
@@ -135,7 +132,6 @@ func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
-		// Уведомляем клиентов о начале проверки
 		BroadcastSSE("check_started", map[string]string{"message": "Проверка запущена"})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -168,7 +164,6 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
-		// Уведомляем клиентов о добавлении нового сайта
 		BroadcastSSE("site_added", map[string]string{"url": req.URL})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -186,7 +181,7 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 			log.Printf("❌ Ошибка получения списка сайтов: %v", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(ErrorResponse{Error: "Ошибка получения списка сайтов"})
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Ошибка получения списка сайтов: " + err.Error()})
 			return
 		}
 
@@ -215,7 +210,6 @@ func DeleteSiteHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
-		// Уведомляем клиентов об удалении сайта
 		BroadcastSSE("site_deleted", map[string]string{"url": url})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -297,12 +291,18 @@ func GetSiteHistoryHandler(db *database.DB) http.HandlerFunc {
 
 func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("📊 Получение статистики дашборда...")
+		
 		stats := DashboardStats{}
 		
 		countQuery := `SELECT COUNT(*) FROM sites`
 		err := db.QueryRow(countQuery).Scan(&stats.TotalSites)
 		if err != nil {
-			log.Printf("Ошибка получения количества сайтов: %v", err)
+			log.Printf("❌ Ошибка получения количества сайтов: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Ошибка получения статистики: " + err.Error()})
+			return
 		}
 		
 		if stats.TotalSites > 0 {
@@ -315,13 +315,16 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 			
 			err = db.QueryRow(statsQuery).Scan(&stats.SitesUp, &stats.SitesDown, &stats.AvgUptime, &stats.AvgResponseTime)
 			if err != nil {
-				log.Printf("Ошибка получения детальной статистики: %v", err)
+				log.Printf("❌ Ошибка получения детальной статистики: %v", err)
 				stats.SitesUp = 0
 				stats.SitesDown = 0
 				stats.AvgUptime = 0.0
 				stats.AvgResponseTime = 0.0
 			}
 		}
+
+		log.Printf("📊 Статистика: сайтов всего=%d, онлайн=%d, оффлайн=%d, аптайм=%.1f%%, среднее время=%.0fмс",
+			stats.TotalSites, stats.SitesUp, stats.SitesDown, stats.AvgUptime, stats.AvgResponseTime)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(stats)
