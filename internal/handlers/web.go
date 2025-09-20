@@ -330,6 +330,105 @@ const webTemplate = `<!DOCTYPE html>
             background: rgba(231, 76, 60, 0.1);
             color: #e74c3c;
         }
+
+        .site-details-toggle {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .site-details-toggle:hover {
+            background: #5a6fd8;
+            transform: translateY(-1px);
+        }
+        
+        .site-details-expanded {
+            margin-top: 15px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border-left: 4px solid #667eea;
+            display: none;
+        }
+        
+        .details-section {
+            margin-bottom: 20px;
+        }
+        
+        .details-section h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .detail-metric {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 3px solid #3498db;
+        }
+        
+        .metric-label {
+            font-size: 0.8em;
+            color: #7f8c8d;
+            margin-bottom: 4px;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .ssl-details {
+            background: rgba(39, 174, 96, 0.1);
+            border-left-color: #27ae60;
+        }
+        
+        .ssl-details.invalid {
+            background: rgba(231, 76, 60, 0.1);
+            border-left-color: #e74c3c;
+        }
+        
+        .performance-bar {
+            background: #ecf0f1;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        
+        .performance-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .perf-excellent { background: #27ae60; }
+        .perf-good { background: #f39c12; }
+        .perf-poor { background: #e74c3c; }
+        
+        .content-info {
+            background: #fff;
+            padding: 10px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #555;
+        }
     </style>
 </head>
 <body>
@@ -529,6 +628,20 @@ const webTemplate = `<!DOCTYPE html>
             return new Date(dateString).toLocaleString('ru-RU');
         }
 
+        function getPerformanceClass(time) {
+            if (time < 500) return 'perf-excellent';
+            if (time < 2000) return 'perf-good';
+            return 'perf-poor';
+        }
+        
+        function getPerformanceWidth(time) {
+            if (time < 100) return '20%';
+            if (time < 500) return '40%';
+            if (time < 1000) return '60%';
+            if (time < 2000) return '80%';
+            return '100%';
+        }
+
         function loadDashboardStats() {
             fetch('/api/dashboard/stats')
                 .then(response => response.json())
@@ -591,7 +704,7 @@ const webTemplate = `<!DOCTYPE html>
                 .then(sites => {
                     const sitesList = document.getElementById('sitesList');
                     if (sites && sites.length > 0) {
-                        sitesList.innerHTML = sites.map(site => {
+                        sitesList.innerHTML = sites.map((site, index) => {
                             const sslIndicator = site.url.startsWith('https://') ? 
                                 (site.ssl_valid ? 
                                     '<span class="ssl-indicator ssl-valid"><i class="fas fa-lock"></i> SSL OK</span>' : 
@@ -615,6 +728,12 @@ const webTemplate = `<!DOCTYPE html>
                                     '<div class="detail-item">' + sslIndicator + '</div>' +
                                 '</div>' +
                                 (site.last_error ? '<div style="color: #e74c3c; font-size: 0.9em; margin-bottom: 10px;"><i class="fas fa-exclamation-triangle"></i> ' + site.last_error + '</div>' : '') +
+                                '<button class="site-details-toggle" onclick="toggleDetails(' + index + ')">' +
+                                    '<i class="fas fa-info-circle"></i> Подробная информация' +
+                                '</button>' +
+                                '<div id="details-' + index + '" class="site-details-expanded">' +
+                                    generateDetailedInfo(site) +
+                                '</div>' +
                                 '<div class="site-actions">' +
                                     '<button class="btn btn-danger" onclick="deleteSite(\'' + site.url + '\')">' +
                                         '<i class="fas fa-trash"></i> Удалить' +
@@ -631,7 +750,156 @@ const webTemplate = `<!DOCTYPE html>
                     document.getElementById('sitesList').innerHTML = '<div class="loading">Ошибка загрузки данных</div>';
                 });
         }
-
+        
+        function generateDetailedInfo(site) {
+            var detailsHtml = 
+                '<div class="details-section">' +
+                    '<h4><i class="fas fa-stopwatch"></i> Время отклика</h4>' +
+                    '<div class="details-grid">' +
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">DNS Lookup</div>' +
+                            '<div class="metric-value">' + formatTime(site.dns_time || 0) + '</div>' +
+                            '<div class="performance-bar"><div class="performance-fill ' + getPerformanceClass(site.dns_time) + '" style="width: ' + getPerformanceWidth(site.dns_time) + '"></div></div>' +
+                        '</div>' +
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">TCP Connect</div>' +
+                            '<div class="metric-value">' + formatTime(site.connect_time || 0) + '</div>' +
+                            '<div class="performance-bar"><div class="performance-fill ' + getPerformanceClass(site.connect_time) + '" style="width: ' + getPerformanceWidth(site.connect_time) + '"></div></div>' +
+                        '</div>';
+            
+            if (site.url.startsWith('https://')) {
+                detailsHtml += 
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">TLS Handshake</div>' +
+                            '<div class="metric-value">' + formatTime(site.tls_time || 0) + '</div>' +
+                            '<div class="performance-bar"><div class="performance-fill ' + getPerformanceClass(site.tls_time) + '" style="width: ' + getPerformanceWidth(site.tls_time) + '"></div></div>' +
+                        '</div>';
+            }
+            
+            detailsHtml += 
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">Time to First Byte</div>' +
+                            '<div class="metric-value">' + formatTime(site.ttfb || 0) + '</div>' +
+                            '<div class="performance-bar"><div class="performance-fill ' + getPerformanceClass(site.ttfb) + '" style="width: ' + getPerformanceWidth(site.ttfb) + '"></div></div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+                
+            if (site.url.startsWith('https://')) {
+                detailsHtml += 
+                '<div class="details-section">' +
+                    '<h4><i class="fas fa-shield-alt"></i> SSL/TLS Сертификат</h4>' +
+                    '<div class="details-grid">' +
+                        '<div class="detail-metric ssl-details ' + (site.ssl_valid ? '' : 'invalid') + '">' +
+                            '<div class="metric-label">Алгоритм</div>' +
+                            '<div class="metric-value">' + (site.ssl_algorithm || 'N/A') + '</div>' +
+                        '</div>' +
+                        '<div class="detail-metric ssl-details ' + (site.ssl_valid ? '' : 'invalid') + '">' +
+                            '<div class="metric-label">Длина ключа</div>' +
+                            '<div class="metric-value">' + (site.ssl_key_length || 0) + ' бит</div>' +
+                        '</div>' +
+                        '<div class="detail-metric ssl-details ' + (site.ssl_valid ? '' : 'invalid') + '">' +
+                            '<div class="metric-label">Издатель</div>' +
+                            '<div class="metric-value">' + (site.ssl_issuer || 'N/A') + '</div>' +
+                        '</div>';
+                
+                if (site.ssl_expiry) {
+                    detailsHtml += 
+                        '<div class="detail-metric ssl-details ' + (site.ssl_valid ? '' : 'invalid') + '">' +
+                            '<div class="metric-label">Действителен до</div>' +
+                            '<div class="metric-value">' + formatDate(site.ssl_expiry) + '</div>' +
+                        '</div>';
+                }
+                
+                detailsHtml += 
+                    '</div>' +
+                '</div>';
+            }
+                
+            detailsHtml += 
+                '<div class="details-section">' +
+                    '<h4><i class="fas fa-server"></i> Информация о сервере</h4>' +
+                    '<div class="details-grid">';
+                    
+            if (site.server_type) {
+                detailsHtml += 
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">Сервер</div>' +
+                            '<div class="metric-value">' + site.server_type + '</div>' +
+                        '</div>';
+            }
+            
+            if (site.powered_by) {
+                detailsHtml += 
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">Powered By</div>' +
+                            '<div class="metric-value">' + site.powered_by + '</div>' +
+                        '</div>';
+            }
+            
+            detailsHtml += 
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">Content-Type</div>' +
+                            '<div class="metric-value">' + (site.content_type || 'N/A') + '</div>' +
+                        '</div>';
+                        
+            if (site.cache_control) {
+                detailsHtml += 
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">Cache-Control</div>' +
+                            '<div class="metric-value">' + site.cache_control + '</div>' +
+                        '</div>';
+            }
+            
+            detailsHtml += 
+                    '</div>' +
+                '</div>' +
+                
+                '<div class="details-section">' +
+                    '<h4><i class="fas fa-exchange-alt"></i> Редиректы и навигация</h4>' +
+                    '<div class="details-grid">' +
+                        '<div class="detail-metric">' +
+                            '<div class="metric-label">Количество редиректов</div>' +
+                            '<div class="metric-value">' + (site.redirect_count || 0) + '</div>' +
+                        '</div>';
+                        
+            if (site.final_url && site.final_url !== site.url) {
+                detailsHtml += 
+                        '<div class="detail-metric" style="grid-column: 1 / -1;">' +
+                            '<div class="metric-label">Финальный URL</div>' +
+                            '<div class="metric-value" style="word-break: break-all;">' + site.final_url + '</div>' +
+                        '</div>';
+            }
+            
+            detailsHtml += 
+                    '</div>' +
+                '</div>' +
+                
+                '<div class="details-section">' +
+                    '<h4><i class="fas fa-file-code"></i> Анализ контента</h4>' +
+                    '<div class="content-info">' +
+                        'Размер контента: ' + formatBytes(site.content_length || 0) + '<br>' +
+                        'Хэш контента: ' + (site.content_hash || 'N/A') + ' (для отслеживания изменений)<br>' +
+                        'Последняя проверка: ' + formatDate(site.last_checked) +
+                    '</div>' +
+                '</div>';
+                
+            return detailsHtml;
+        }
+        
+        function toggleDetails(index) {
+            const details = document.getElementById('details-' + index);
+            const button = details.previousElementSibling;
+            
+            if (details.style.display === 'block') {
+                details.style.display = 'none';
+                button.innerHTML = '<i class="fas fa-info-circle"></i> Подробная информация';
+            } else {
+                details.style.display = 'block';
+                button.innerHTML = '<i class="fas fa-times"></i> Скрыть подробности';
+            }
+        }
+        
         document.getElementById('addSiteForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const url = document.getElementById('url').value;
