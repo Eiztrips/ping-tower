@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -16,11 +15,12 @@ import (
 	"time"
 
 	"site-monitor/internal/models"
+	"site-monitor/internal/database"
 	_ "github.com/lib/pq"
 )
 
 type Checker struct {
-	db       *sql.DB
+	db       *database.DB
 	interval time.Duration
 	client   *http.Client
 }
@@ -55,7 +55,7 @@ type CheckResult struct {
 	Cookies       []string  `json:"cookies"`
 }
 
-func NewChecker(db *sql.DB, interval time.Duration) *Checker {
+func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
@@ -99,7 +99,10 @@ func (c *Checker) Start() {
 func (c *Checker) checkAllSites() {
 	log.Println("📋 Получение списка сайтов для проверки...")
 	
-	rows, err := c.db.Query("SELECT id, url FROM sites")
+	rows, err := c.db.Query(`SELECT s.id, s.url, c.enabled, c.check_interval 
+							 FROM sites s 
+							 LEFT JOIN site_configs c ON s.id = c.site_id 
+							 WHERE COALESCE(c.enabled, true) = true`)
 	if err != nil {
 		log.Printf("❌ Ошибка получения списка сайтов: %v", err)
 		return
@@ -109,26 +112,60 @@ func (c *Checker) checkAllSites() {
 	sitesCount := 0
 	for rows.Next() {
 		var site models.Site
-		if err := rows.Scan(&site.ID, &site.URL); err != nil {
+		var enabled bool
+		var checkInterval int
+		
+		if err := rows.Scan(&site.ID, &site.URL, &enabled, &checkInterval); err != nil {
 			log.Printf("❌ Ошибка чтения данных сайта: %v", err)
 			continue
 		}
 		
-		sitesCount++
-		log.Printf("🔍 Проверяем сайт: %s (ID: %d)", site.URL, site.ID)
+		if !enabled {
+			continue
+		}
 		
-		result := c.checkSite(site.URL)
+		sitesCount++
+		log.Printf("🔍 Проверяем сайт: %s (ID: %d, интервал: %ds)", site.URL, site.ID, checkInterval)
+		
+		config, err := c.db.GetSiteConfig(site.ID)
+		if err != nil {
+			log.Printf("❌ Ошибка получения конфигурации для сайта %d: %v", site.ID, err)
+			config = &models.SiteConfig{
+				SiteID: site.ID,
+				CheckInterval: 30,
+				Timeout: 30,
+				ExpectedStatus: 200,
+				FollowRedirects: true,
+				MaxRedirects: 10,
+				CheckSSL: true,
+				UserAgent: "Site-Monitor/1.0",
+				// Conservative defaults - only basic metrics
+				CollectDNSTime: false,
+				CollectConnectTime: false,
+				CollectTLSTime: false,
+				CollectTTFB: false,
+				CollectContentHash: false,
+				CollectRedirects: false,
+				CollectSSLDetails: true,
+				CollectServerInfo: false,
+				CollectHeaders: false,
+			}
+		}
+		
+		result := c.checkSiteWithConfig(site.URL, config)
 		c.updateSiteStatus(&site, result)
 		c.saveCheckHistory(site.ID, result)
 		
 		time.Sleep(500 * time.Millisecond)
 	}
 	
-	log.Printf("✅ Проверено сайтов: %d", sitesCount)
+	log.Printf("✅ Проверено активных сайтов: %d", sitesCount)
 }
 
-func (c *Checker) checkSite(siteURL string) CheckResult {
-	log.Printf("🌐 Начинаем детальную проверку: %s", siteURL)
+func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig) CheckResult {
+	log.Printf("🌐 Проверка с конфигурацией: %s (таймаут: %ds, ожидаемый статус: %d)", 
+		siteURL, config.Timeout, config.ExpectedStatus)
+	
 	start := time.Now()
 	result := CheckResult{
 		Status:     "down",
@@ -139,106 +176,187 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		Cookies:    []string{},
 	}
 
+	// Use config for timeout
+	client := &http.Client{
+		Timeout: time.Duration(config.Timeout) * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: time.Duration(config.Timeout/3) * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: time.Duration(config.Timeout/3) * time.Second,
+		},
+	}
+
+	// Handle redirects based on config
+	redirectCount := 0
+	if config.FollowRedirects {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			redirectCount++
+			if redirectCount > config.MaxRedirects {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		}
+	} else {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+
+	// Create request with custom User-Agent
+	req, err := http.NewRequest("GET", siteURL, nil)
+	if err != nil {
+		result.Error = fmt.Sprintf("Invalid request: %v", err)
+		return result
+	}
+	
+	if config.UserAgent != "" {
+		req.Header.Set("User-Agent", config.UserAgent)
+	}
+
+	// Add custom headers
+	for key, value := range config.Headers {
+		if strValue, ok := value.(string); ok {
+			req.Header.Set(key, strValue)
+		}
+	}
+
 	parsedURL, err := url.Parse(siteURL)
 	if err != nil {
 		result.Error = fmt.Sprintf("Invalid URL: %v", err)
 		return result
 	}
 
-	dnsStart := time.Now()
-	ips, err := net.LookupIP(parsedURL.Hostname())
-	if err != nil {
-		result.Error = fmt.Sprintf("DNS lookup failed: %v", err)
-		return result
+	// DNS lookup only if enabled
+	if config.CollectDNSTime {
+		dnsStart := time.Now()
+		ips, err := net.LookupIP(parsedURL.Hostname())
+		if err != nil {
+			result.Error = fmt.Sprintf("DNS lookup failed: %v", err)
+			return result
+		}
+		result.DNSTime = time.Since(dnsStart).Milliseconds()
+		log.Printf("🔍 DNS lookup для %s: %dмс, IP: %v", siteURL, result.DNSTime, ips[0])
 	}
-	result.DNSTime = time.Since(dnsStart).Milliseconds()
-	log.Printf("🔍 DNS lookup для %s: %dмс, IP: %v", siteURL, result.DNSTime, ips[0])
 
-	if strings.HasPrefix(siteURL, "https://") {
+	// SSL check only if enabled
+	if strings.HasPrefix(siteURL, "https://") && config.CollectSSLDetails {
 		log.Printf("🔒 Детальная SSL проверка для: %s", siteURL)
 		sslValid, sslExpiry, sslDetails := c.checkSSLDetailed(siteURL)
 		result.SSLValid = sslValid
 		result.SSLExpiry = sslExpiry
-		result.SSLKeyLength = sslDetails.KeyLength
-		result.SSLAlgorithm = sslDetails.Algorithm
-		result.SSLIssuer = sslDetails.Issuer
+		if config.CollectSSLDetails {
+			result.SSLKeyLength = sslDetails.KeyLength
+			result.SSLAlgorithm = sslDetails.Algorithm
+			result.SSLIssuer = sslDetails.Issuer
+		}
 	}
 
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout: 10 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}
-
-	redirectCount := 0
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			redirectCount++
-			if redirectCount > 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
-	}
-
-	connectStart := time.Now()
-	resp, err := client.Get(siteURL)
+	// Collect performance metrics based on config
+	requestStart := time.Now()
+	resp, err := client.Do(req)
 	if err != nil {
 		result.Error = err.Error()
 		result.ResponseTime = time.Since(start).Milliseconds()
-		log.Printf("❌ Ошибка при проверке %s: %v", siteURL, err)
 		return result
 	}
 	defer resp.Body.Close()
 
-	result.ConnectTime = time.Since(connectStart).Milliseconds()
-	result.RedirectCount = redirectCount
-	result.FinalURL = resp.Request.URL.String()
-	result.ResponseTime = time.Since(start).Milliseconds()
 	result.StatusCode = resp.StatusCode
+	result.ResponseTime = time.Since(start).Milliseconds()
 
-	ttfbStart := time.Now()
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err == nil {
-		result.TTFB = time.Since(ttfbStart).Milliseconds()
-		result.ContentLength = int64(len(bodyBytes))
-		
-		hash := sha256.Sum256(bodyBytes)
-		result.ContentHash = fmt.Sprintf("%x", hash[:8])
-		
-		result.Keywords = c.findKeywords(string(bodyBytes))
-		
-		log.Printf("📄 Контент %s: размер %d байт, хэш %s, ключевых слов найдено: %d", 
-			siteURL, result.ContentLength, result.ContentHash, len(result.Keywords))
+	// Collect timing metrics based on configuration
+	if config.CollectTTFB {
+		result.TTFB = time.Since(requestStart).Milliseconds() - result.ResponseTime
 	}
 
-	result.Headers = make(map[string]string)
-	for key, values := range resp.Header {
-		if len(values) > 0 {
-			result.Headers[key] = values[0]
+	// Server info collection based on config
+	if config.CollectServerInfo || config.CollectHeaders {
+		if server := resp.Header.Get("Server"); server != "" && config.CollectServerInfo {
+			result.ServerType = server
+		}
+		if powered := resp.Header.Get("X-Powered-By"); powered != "" && config.CollectServerInfo {
+			result.PoweredBy = powered
+		}
+		if contentType := resp.Header.Get("Content-Type"); contentType != "" && config.CollectHeaders {
+			result.ContentType = contentType
+		}
+		if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" && config.CollectHeaders {
+			result.CacheControl = cacheControl
 		}
 	}
 
-	result.ServerType = resp.Header.Get("Server")
-	result.PoweredBy = resp.Header.Get("X-Powered-By")
-	result.ContentType = resp.Header.Get("Content-Type")
-	result.CacheControl = resp.Header.Get("Cache-Control")
-
-	for _, cookie := range resp.Cookies() {
-		result.Cookies = append(result.Cookies, cookie.Name+"="+cookie.Value)
+	// Redirect tracking based on config
+	if config.CollectRedirects {
+		result.RedirectCount = redirectCount
+		result.FinalURL = resp.Request.URL.String()
 	}
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+	// Check expected status
+	statusValid := false
+	if config.ExpectedStatus == 0 {
+		statusValid = resp.StatusCode >= 200 && resp.StatusCode < 400
+	} else {
+		statusValid = resp.StatusCode == config.ExpectedStatus
+	}
+
+	// Read response body for content checks
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err == nil {
+		result.ContentLength = int64(len(bodyBytes))
+		
+		// Content hash only if enabled
+		if config.CollectContentHash {
+			hash := sha256.Sum256(bodyBytes)
+			result.ContentHash = fmt.Sprintf("%x", hash[:8])
+		}
+		
+		// Check keywords if configured
+		if config.CheckKeywords != "" || config.AvoidKeywords != "" {
+			content := string(bodyBytes)
+			contentLower := strings.ToLower(content)
+			
+			// Check required keywords
+			if config.CheckKeywords != "" {
+				keywords := strings.Split(config.CheckKeywords, ",")
+				keywordFound := false
+				for _, keyword := range keywords {
+					keyword = strings.TrimSpace(keyword)
+					if keyword != "" && strings.Contains(contentLower, strings.ToLower(keyword)) {
+						keywordFound = true
+						result.Keywords = append(result.Keywords, keyword)
+					}
+				}
+				if !keywordFound && len(keywords) > 0 {
+					statusValid = false
+					result.Error = "Required keywords not found"
+				}
+			}
+			
+			// Check avoid keywords
+			if config.AvoidKeywords != "" {
+				avoidWords := strings.Split(config.AvoidKeywords, ",")
+				for _, word := range avoidWords {
+					word = strings.TrimSpace(word)
+					if word != "" && strings.Contains(contentLower, strings.ToLower(word)) {
+						statusValid = false
+						result.Error = "Forbidden keyword found: " + word
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if statusValid {
 		result.Status = "up"
-		log.Printf("✅ Детальная проверка %s завершена успешно (код: %d, время: %dмс, редиректов: %d)", 
-			siteURL, resp.StatusCode, result.ResponseTime, result.RedirectCount)
+		log.Printf("✅ Сайт %s доступен (код: %d, конфиг OK)", siteURL, resp.StatusCode)
 	} else {
 		result.Status = "down"
-		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
-		log.Printf("❌ Сайт %s недоступен (код: %d)", siteURL, resp.StatusCode)
+		if result.Error == "" {
+			result.Error = fmt.Sprintf("Unexpected status: %d (expected: %d)", resp.StatusCode, config.ExpectedStatus)
+		}
+		log.Printf("❌ Сайт %s недоступен: %s", siteURL, result.Error)
 	}
 
 	return result
@@ -386,7 +504,7 @@ func (c *Checker) saveCheckHistory(siteID int, result CheckResult) {
 	}
 }
 
-func StartMonitoring(db *sql.DB, interval time.Duration) {
+func StartMonitoring(db *database.DB, interval time.Duration) {
 	checker := NewChecker(db, interval)
 	checker.Start()
 }

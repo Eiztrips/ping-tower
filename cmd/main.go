@@ -47,7 +47,7 @@ func main() {
     time.Sleep(2 * time.Second)
     
     log.Printf("🔍 Запуск мониторинга с интервалом %v", cfg.CheckInterval)
-    go monitor.StartMonitoring(db.DB, cfg.CheckInterval)
+    go monitor.StartMonitoring(db, cfg.CheckInterval)
     
     log.Printf("🌐 Сервер запущен на http://localhost%s", cfg.ServerAddress)
     if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {

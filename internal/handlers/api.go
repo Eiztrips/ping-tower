@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"site-monitor/internal/database"
+	"site-monitor/internal/models"
 	"fmt"
 	"log"
 	"time"
@@ -59,6 +60,8 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/api/dashboard/stats", GetDashboardStatsHandler(db)).Methods("GET")
 	r.HandleFunc("/api/check", TriggerCheckHandler(db)).Methods("POST")
 	r.HandleFunc("/api/sse", SSEHandler()).Methods("GET")
+	r.HandleFunc("/api/sites/{id}/config", GetSiteConfigHandler(db)).Methods("GET")
+	r.HandleFunc("/api/sites/{id}/config", UpdateSiteConfigHandler(db)).Methods("PUT")
 }
 
 func SSEHandler() http.HandlerFunc {
@@ -174,7 +177,7 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 
 func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("🔍 Получение списка всех сайтов...")
+		log.Println("🔍 Получение списка всех сайтов с конфигурациями...")
 		
 		sites, err := db.GetAllSites()
 		if err != nil {
@@ -185,12 +188,15 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
-		log.Printf("✅ Успешно получен список из %d сайтов", len(sites))
-		
-		if len(sites) > 0 {
-			log.Printf("🔍 Первый сайт: ID=%d, URL=%s, Status=%s", 
-				sites[0].ID, sites[0].URL, sites[0].Status)
+		// Load configurations for each site
+		for i, site := range sites {
+			config, err := db.GetSiteConfig(site.ID)
+			if err == nil {
+				sites[i].Config = config
+			}
 		}
+
+		log.Printf("✅ Успешно получен список из %d сайтов с конфигурациями", len(sites))
 		
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sites)
@@ -328,5 +334,71 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(stats)
+	}
+}
+
+func GetSiteConfigHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		siteID := vars["id"]
+
+		var id int
+		if _, err := fmt.Sscanf(siteID, "%d", &id); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid site ID"})
+			return
+		}
+
+		config, err := db.GetSiteConfig(id)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(config)
+	}
+}
+
+func UpdateSiteConfigHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		siteID := vars["id"]
+
+		var id int
+		if _, err := fmt.Sscanf(siteID, "%d", &id); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid site ID"})
+			return
+		}
+
+		var config models.SiteConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid request format"})
+			return
+		}
+
+		config.SiteID = id
+		err := db.UpdateSiteConfig(&config)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		BroadcastSSE("site_config_updated", map[string]interface{}{
+			"site_id": id,
+			"config": config,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
 }
