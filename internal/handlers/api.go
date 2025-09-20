@@ -2,20 +2,27 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"site-monitor/internal/database"
 	"site-monitor/internal/models"
 	"site-monitor/internal/monitor"
-	"fmt"
-	"log"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
 )
 
+var apiDatabase *database.DB
+
+func SetAPIDatabase(db *database.DB) {
+	apiDatabase = db
+}
+
 type SiteStatusResponse struct {
-	URL    string `json:"url"`
-	Status string `json:"status"`
+	URL         string `json:"url"`
+	Status      string `json:"status"`
 	LastChecked string `json:"last_checked"`
 }
 
@@ -52,29 +59,701 @@ func init() {
 }
 
 func RegisterRoutes(r *mux.Router, db *database.DB) {
-	// Set database for demo handler
+	// Set database for handlers
 	SetDemoDatabase(db)
-	
+	SetAPIDatabase(db)
+
+	// Main interface routes
 	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
 	r.HandleFunc("/demo", DemoHandler()).Methods("GET")
+	r.HandleFunc("/metrics", MetricsWebHandler()).Methods("GET")
+
+	// API routes for sites management
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
 	r.HandleFunc("/api/sites", GetAllSitesHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{url}/status", GetSiteStatusHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/delete", DeleteSiteByURLHandler(db)).Methods("DELETE")
 	r.HandleFunc("/api/sites/{id}/history", GetSiteHistoryHandler(db)).Methods("GET")
-	r.HandleFunc("/api/dashboard/stats", GetDashboardStatsHandler(db)).Methods("GET")
-	r.HandleFunc("/api/check", TriggerCheckHandler(db)).Methods("POST")
-	r.HandleFunc("/api/sse", SSEHandler()).Methods("GET")
 	r.HandleFunc("/api/sites/{id}/config", GetSiteConfigHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{id}/config", UpdateSiteConfigHandler(db)).Methods("PUT")
 
-	r.HandleFunc("/api/metrics/sites/{id}/hourly", HandleGetHourlyMetrics).Methods("GET")
-	r.HandleFunc("/api/metrics/sites/{id}/performance", HandleGetPerformanceSummary).Methods("GET")
-	r.HandleFunc("/api/metrics/ssl/alerts", HandleGetSSLAlerts).Methods("GET")
-	r.HandleFunc("/api/metrics/health", HandleGetSystemHealth).Methods("GET")
-	r.HandleFunc("/api/metrics/stats", HandleGetMetricsStats).Methods("GET")
+	// Dashboard and monitoring
+	r.HandleFunc("/api/dashboard/stats", GetDashboardStatsHandler(db)).Methods("GET")
+	r.HandleFunc("/api/check", TriggerCheckHandler(db)).Methods("POST")
+	r.HandleFunc("/api/sse", SSEHandler()).Methods("GET")
+	r.HandleFunc("/api/health", HandleHealthCheck).Methods("GET")
+
+	// Real SSL alerts endpoint using database
+	r.HandleFunc("/api/ssl/alerts", HandleGetSSLAlertsFromDB(db)).Methods("GET")
+
+	// Metrics API endpoints - real data from database
+	r.HandleFunc("/api/metrics/sites/{id}/hourly", HandleGetHourlyMetricsFromDB(db)).Methods("GET")
+	r.HandleFunc("/api/metrics/sites/{id}/performance", HandleGetPerformanceSummaryFromDB(db)).Methods("GET") 
+	r.HandleFunc("/api/metrics/aggregated", HandleGetAggregatedMetricsFromDB(db)).Methods("GET")
+	r.HandleFunc("/api/metrics/health", HandleGetSystemHealthFromDB(db)).Methods("GET")
+	r.HandleFunc("/api/metrics/stats", HandleGetMetricsStatsFromDB(db)).Methods("GET")
+
+	// ClickHouse metrics endpoints (if available)
+	if metricsService != nil {
+		r.HandleFunc("/api/clickhouse/metrics/sites/{id}/hourly", HandleGetHourlyMetrics).Methods("GET")
+		r.HandleFunc("/api/clickhouse/metrics/sites/{id}/performance", HandleGetPerformanceSummary).Methods("GET")
+		r.HandleFunc("/api/clickhouse/ssl/alerts", HandleGetSSLAlerts).Methods("GET")
+		r.HandleFunc("/api/clickhouse/metrics/health", HandleGetSystemHealth).Methods("GET")
+		r.HandleFunc("/api/clickhouse/metrics/stats", HandleGetMetricsStats).Methods("GET")
+	}
 }
 
+// HandleGetSSLAlertsFromDB - получить SSL алерты из PostgreSQL
+func HandleGetSSLAlertsFromDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		daysStr := r.URL.Query().Get("days")
+		days := 30
+		if daysStr != "" {
+			if d, err := strconv.Atoi(daysStr); err == nil {
+				days = d
+			}
+		}
+
+		// Получаем сайты с истекающими SSL сертификатами из PostgreSQL
+		query := `SELECT id, url, ssl_issuer, ssl_expiry, ssl_valid
+				  FROM sites 
+				  WHERE url LIKE 'https://%' 
+				  AND ssl_expiry IS NOT NULL 
+				  AND ssl_expiry > NOW() 
+				  AND ssl_expiry <= NOW() + INTERVAL '%d days'
+				  ORDER BY ssl_expiry ASC`
+
+		rows, err := db.Query(fmt.Sprintf(query, days))
+		if err != nil {
+			log.Printf("Ошибка запроса SSL алертов: %v", err)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"expiring_within_days": days,
+				"certificates":         []interface{}{},
+			})
+			return
+		}
+		defer rows.Close()
+
+		var certificates []map[string]interface{}
+		for rows.Next() {
+			var id int
+			var url, issuer string
+			var expiry time.Time
+			var valid bool
+
+			if err := rows.Scan(&id, &url, &issuer, &expiry, &valid); err != nil {
+				continue
+			}
+
+			daysUntilExpiry := int(time.Until(expiry).Hours() / 24)
+			certificates = append(certificates, map[string]interface{}{
+				"site_id":           id,
+				"site_url":          url,
+				"ssl_issuer":        issuer,
+				"ssl_expiry":        expiry,
+				"days_until_expiry": daysUntilExpiry,
+				"is_valid":          valid,
+			})
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"expiring_within_days": days,
+			"certificates":         certificates,
+		})
+	}
+}
+
+// HandleGetHourlyMetricsFromDB - получить почасовые метрики из PostgreSQL
+func HandleGetHourlyMetricsFromDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		siteIDStr := vars["id"]
+		siteID, err := strconv.Atoi(siteIDStr)
+		if err != nil {
+			http.Error(w, `{"error": "Invalid site ID"}`, http.StatusBadRequest)
+			return
+		}
+
+		hoursStr := r.URL.Query().Get("hours")
+		hours := 24
+		if hoursStr != "" {
+			if h, err := strconv.Atoi(hoursStr); err == nil {
+				hours = h
+			}
+		}
+
+		// Получаем историю проверок из PostgreSQL
+		history, err := db.GetSiteHistory(siteID, hours*4) // Приблизительно по 4 проверки в час
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to fetch history: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		// Группируем по часам
+		hourlyData := make(map[string]*HourlyMetrics)
+		for _, record := range history {
+			hour := record.CheckedAt.Truncate(time.Hour).Format("2006-01-02T15:04:05Z")
+			
+			if hourlyData[hour] == nil {
+				hourlyData[hour] = &HourlyMetrics{
+					Hour:    record.CheckedAt.Truncate(time.Hour),
+					SiteID:  uint32(siteID),
+					SiteURL: "",
+				}
+			}
+			
+			hourlyData[hour].TotalChecks++
+			if record.Status == "up" {
+				hourlyData[hour].SuccessfulChecks++
+			}
+			
+			if record.ResponseTime > 0 {
+				if hourlyData[hour].AvgResponseTime == 0 {
+					hourlyData[hour].AvgResponseTime = float64(record.ResponseTime)
+				} else {
+					hourlyData[hour].AvgResponseTime = (hourlyData[hour].AvgResponseTime + float64(record.ResponseTime)) / 2
+				}
+			}
+		}
+
+		// Преобразуем в слайс
+		var metrics []HourlyMetrics
+		for _, data := range hourlyData {
+			metrics = append(metrics, *data)
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"site_id": siteID,
+			"hours":   hours,
+			"metrics": metrics,
+		})
+	}
+}
+
+// HandleGetPerformanceSummaryFromDB - получить сводку производительности из PostgreSQL
+func HandleGetPerformanceSummaryFromDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		siteIDStr := vars["id"]
+		siteID, err := strconv.Atoi(siteIDStr)
+		if err != nil {
+			http.Error(w, `{"error": "Invalid site ID"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Получаем сайт из базы данных
+		site, err := db.GetSiteByURL("") // Получим через ID
+		if err != nil {
+			// Получаем через запрос по ID
+			query := `SELECT 
+						url, status, response_time, content_length, dns_time, connect_time, 
+						tls_time, ttfb, total_checks, successful_checks, last_checked
+					  FROM sites WHERE id = $1`
+			
+			var url, status string
+			var responseTime, contentLength, dnsTime, connectTime, tlsTime, ttfb int64
+			var totalChecks, successfulChecks int
+			var lastChecked time.Time
+			
+			err = db.QueryRow(query, siteID).Scan(
+				&url, &status, &responseTime, &contentLength, &dnsTime,
+				&connectTime, &tlsTime, &ttfb, &totalChecks, &successfulChecks, &lastChecked,
+			)
+			
+			if err != nil {
+				http.Error(w, `{"error": "Site not found"}`, http.StatusNotFound)
+				return
+			}
+			
+			uptimePercent := 0.0
+			if totalChecks > 0 {
+				uptimePercent = float64(successfulChecks) / float64(totalChecks) * 100
+			}
+			
+			summary := map[string]interface{}{
+				"site_id":            siteID,
+				"site_url":           url,
+				"period":             "Реальные данные из БД",
+				"total_checks":       totalChecks,
+				"successful_checks":  successfulChecks,
+				"uptime_percent":     uptimePercent,
+				"avg_response_time":  responseTime,
+				"avg_dns_time":       dnsTime,
+				"avg_connect_time":   connectTime,
+				"avg_tls_time":       tlsTime,
+				"avg_ttfb":           ttfb,
+				"last_checked":       lastChecked,
+			}
+			
+			json.NewEncoder(w).Encode(summary)
+			return
+		}
+
+		// Если сайт найден через URL, используем его данные
+		uptimePercent := 0.0
+		if site.TotalChecks > 0 {
+			uptimePercent = float64(site.SuccessfulChecks) / float64(site.TotalChecks) * 100
+		}
+		
+		summary := map[string]interface{}{
+			"site_id":            site.ID,
+			"site_url":           site.URL,
+			"period":             "Реальные данные из БД",
+			"total_checks":       site.TotalChecks,
+			"successful_checks":  site.SuccessfulChecks,
+			"uptime_percent":     uptimePercent,
+			"avg_response_time":  site.ResponseTime,
+			"avg_dns_time":       site.DNSTime,
+			"avg_connect_time":   site.ConnectTime,
+			"avg_tls_time":       site.TLSTime,
+			"avg_ttfb":           site.TTFB,
+			"last_checked":       site.LastChecked,
+		}
+		
+		json.NewEncoder(w).Encode(summary)
+	}
+}
+
+// HandleGetAggregatedMetricsFromDB - получить агрегированные метрики из PostgreSQL
+func HandleGetAggregatedMetricsFromDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		hoursStr := r.URL.Query().Get("hours")
+		// Удаляем неиспользуемую переменную hours
+		// hours := 24
+		// if hoursStr != "" {
+		//	if h, err := strconv.Atoi(hoursStr); err == nil {
+		//		hours = h
+		//	}
+		// }
+
+		// Получаем агрегированные данные из PostgreSQL
+		sites, err := db.GetAllSites()
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to fetch sites: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		// Агрегируем данные
+		totalChecks := 0
+		totalResponseTime := int64(0)
+		totalDnsTime := int64(0)
+		totalConnectTime := int64(0)
+		totalTlsTime := int64(0)
+		totalTtfb := int64(0)
+		responseCount := 0
+		sslIssues := 0
+		uptimeSum := 0.0
+
+		for _, site := range sites {
+			totalChecks += site.TotalChecks
+			
+			if site.ResponseTime > 0 {
+				totalResponseTime += site.ResponseTime
+				responseCount++
+			}
+			if site.DNSTime > 0 {
+				totalDnsTime += site.DNSTime
+			}
+			if site.ConnectTime > 0 {
+				totalConnectTime += site.ConnectTime
+			}
+			if site.TLSTime > 0 {
+				totalTlsTime += site.TLSTime
+			}
+			if site.TTFB > 0 {
+				totalTtfb += site.TTFB
+			}
+			
+			if len(site.URL) >= 8 && site.URL[:8] == "https://" && !site.SSLValid {
+				sslIssues++
+			}
+			
+			uptimePercent := 0.0
+			if site.TotalChecks > 0 {
+				uptimePercent = float64(site.SuccessfulChecks) / float64(site.TotalChecks) * 100
+			}
+			uptimeSum += uptimePercent
+		}
+
+		siteCount := len(sites)
+		avgResponseTime := 0.0
+		avgDnsTime := 0.0
+		avgConnectTime := 0.0
+		avgTlsTime := 0.0
+		avgTtfb := 0.0
+		avgUptime := 0.0
+
+		if responseCount > 0 {
+			avgResponseTime = float64(totalResponseTime) / float64(responseCount)
+		}
+		if siteCount > 0 {
+			avgDnsTime = float64(totalDnsTime) / float64(siteCount)
+			avgConnectTime = float64(totalConnectTime) / float64(siteCount)
+			avgTlsTime = float64(totalTlsTime) / float64(siteCount)
+			avgTtfb = float64(totalTtfb) / float64(siteCount)
+			avgUptime = uptimeSum / float64(siteCount)
+		}
+
+		// Определяем период из параметра запроса
+		period := "Реальные данные из БД"
+		if hoursStr != "" {
+			period = fmt.Sprintf("Реальные данные из БД за последние %s часов", hoursStr)
+		}
+
+		response := map[string]interface{}{
+			"period":             fmt.Sprintf("%s (анализ %d сайтов)", period, siteCount),
+			"total_checks":       totalChecks,
+			"avg_response_time":  avgResponseTime,
+			"avg_dns_time":       avgDnsTime,
+			"avg_connect_time":   avgConnectTime,
+			"avg_tls_time":       avgTlsTime,
+			"avg_ttfb":           avgTtfb,
+			"uptime_percent":     avgUptime,
+			"ssl_issues":         sslIssues,
+			"sites_analyzed":     siteCount,
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// HandleGetSystemHealthFromDB - получить состояние системы на основе PostgreSQL
+func HandleGetSystemHealthFromDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		health := map[string]interface{}{
+			"postgres_connected":   false,
+			"clickhouse_connected": false,
+			"sites_count":          0,
+			"active_sites":         0,
+			"last_check":           nil,
+		}
+
+		// Проверяем PostgreSQL
+		if err := db.DB.Ping(); err == nil {
+			health["postgres_connected"] = true
+
+			// Получаем статистику сайтов
+			var sitesCount, activeSites int
+			var lastCheck time.Time
+
+			db.QueryRow("SELECT COUNT(*) FROM sites").Scan(&sitesCount)
+			db.QueryRow("SELECT COUNT(*) FROM sites WHERE status = 'up'").Scan(&activeSites)
+			db.QueryRow("SELECT MAX(last_checked) FROM sites").Scan(&lastCheck)
+
+			health["sites_count"] = sitesCount
+			health["active_sites"] = activeSites
+			health["last_check"] = lastCheck
+		}
+
+		// Проверяем ClickHouse если доступен
+		if metricsService != nil {
+			systemHealth := metricsService.GetSystemHealth()
+			if connected, ok := systemHealth["clickhouse_connected"].(bool); ok {
+				health["clickhouse_connected"] = connected
+			}
+		}
+
+		json.NewEncoder(w).Encode(health)
+	}
+}
+
+// HandleGetMetricsStatsFromDB - получить статистику метрик из PostgreSQL  
+func HandleGetMetricsStatsFromDB(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Получаем статистику из PostgreSQL
+		var totalSites, activeSites, totalChecks int
+		var avgResponseTime float64
+
+		db.QueryRow("SELECT COUNT(*) FROM sites").Scan(&totalSites)
+		db.QueryRow("SELECT COUNT(*) FROM sites WHERE status = 'up'").Scan(&activeSites)
+		db.QueryRow("SELECT COALESCE(SUM(total_checks), 0) FROM sites").Scan(&totalChecks)
+		db.QueryRow("SELECT COALESCE(AVG(response_time), 0) FROM sites WHERE response_time > 0").Scan(&avgResponseTime)
+
+		response := map[string]interface{}{
+			"service_status": "active",
+			"database_status": map[string]interface{}{
+				"postgres": true,
+				"clickhouse": metricsService != nil,
+			},
+			"sites_metrics": map[string]interface{}{
+				"total_sites": totalSites,
+				"active_sites": activeSites,
+				"total_checks": totalChecks,
+				"avg_response_time": avgResponseTime,
+			},
+		}
+
+		// Добавляем ClickHouse метрики если доступны
+		if metricsService != nil {
+			stats := metricsService.GetSystemHealth()
+			response["clickhouse_metrics"] = map[string]interface{}{
+				"buffer_size": stats["buffer_size"],
+				"batch_size": stats["batch_size"],
+				"flush_interval": stats["flush_interval"],
+			}
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// HandleGetAllSites - получить все сайты
+func HandleGetAllSites(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if apiDatabase == nil {
+		http.Error(w, `{"error": "Database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	sites, err := apiDatabase.GetAllSites()
+	if err != nil {
+		log.Printf("Ошибка получения сайтов: %v", err)
+		http.Error(w, `{"error": "Failed to fetch sites"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(sites)
+}
+
+// HandleAddSite - добавить новый сайт
+func HandleAddSite(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var request struct {
+		URL string `json:"url"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if request.URL == "" {
+		http.Error(w, `{"error": "URL is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if apiDatabase == nil {
+		http.Error(w, `{"error": "Database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	err := apiDatabase.AddSite(request.URL)
+	if err != nil {
+		log.Printf("Ошибка добавления сайта: %v", err)
+		http.Error(w, `{"error": "Failed to add site"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Site added successfully",
+		"url":     request.URL,
+	})
+}
+
+// HandleDeleteSite - удалить сайт
+func HandleDeleteSite(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var request struct {
+		URL string `json:"url"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if apiDatabase == nil {
+		http.Error(w, `{"error": "Database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	err := apiDatabase.DeleteSite(request.URL)
+	if err != nil {
+		log.Printf("Ошибка удаления сайта: %v", err)
+		http.Error(w, `{"error": "Failed to delete site"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Site deleted successfully",
+		"url":     request.URL,
+	})
+}
+
+// HandleGetSiteConfig - получить конфигурацию сайта
+func HandleGetSiteConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	siteIDStr := vars["id"]
+	siteID, err := strconv.Atoi(siteIDStr)
+	if err != nil {
+		http.Error(w, `{"error": "Invalid site ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if apiDatabase == nil {
+		http.Error(w, `{"error": "Database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	config, err := apiDatabase.GetSiteConfig(siteID)
+	if err != nil {
+		log.Printf("Ошибка получения конфигурации: %v", err)
+		// Возвращаем базовую конфигурацию если не найдена
+		config = &models.SiteConfig{
+			SiteID:               siteID,
+			CheckInterval:        300,
+			Timeout:              30,
+			ExpectedStatus:       200,
+			FollowRedirects:      true,
+			MaxRedirects:         10,
+			CheckSSL:             true,
+			SSLAlertDays:         30,
+			UserAgent:            "Site-Monitor/1.0",
+			Enabled:              true,
+			NotifyOnDown:         true,
+			NotifyOnUp:           true,
+			CollectSSLDetails:    true,
+			ShowResponseTime:     true,
+			ShowContentLength:    true,
+			ShowUptime:           true,
+			ShowSSLInfo:          true,
+		}
+	}
+
+	json.NewEncoder(w).Encode(config)
+}
+
+// HandleUpdateSiteConfig - обновить конфигурацию сайта
+func HandleUpdateSiteConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	siteIDStr := vars["id"]
+	siteID, err := strconv.Atoi(siteIDStr)
+	if err != nil {
+		http.Error(w, `{"error": "Invalid site ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	var config models.SiteConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, `{"error": "Invalid request format"}`, http.StatusBadRequest)
+		return
+	}
+
+	config.SiteID = siteID
+	err = apiDatabase.UpdateSiteConfig(&config)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	BroadcastSSE("site_config_updated", map[string]interface{}{
+		"site_id": siteID,
+		"config":  config,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// HandleTriggerCheck - запустить проверку всех сайтов
+func HandleTriggerCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if apiDatabase == nil {
+		http.Error(w, `{"error": "Database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	err := apiDatabase.TriggerCheck()
+	if err != nil {
+		log.Printf("Ошибка запуска проверки: %v", err)
+		http.Error(w, `{"error": "Failed to trigger check"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Check triggered successfully",
+	})
+}
+
+// HandleDashboardStats - статистика для дашборда
+func HandleDashboardStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if apiDatabase == nil {
+		http.Error(w, `{"error": "Database not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	var stats DashboardStats
+
+	// Получаем базовую статистику
+	countQuery := `SELECT COUNT(*) FROM sites`
+	apiDatabase.QueryRow(countQuery).Scan(&stats.TotalSites)
+
+	if stats.TotalSites > 0 {
+		statsQuery := `SELECT 
+						COUNT(CASE WHEN status = 'up' THEN 1 END) as up,
+						COUNT(CASE WHEN status = 'down' THEN 1 END) as down,
+						COALESCE(AVG(CASE WHEN COALESCE(total_checks, 0) > 0 THEN (COALESCE(successful_checks, 0)::float / COALESCE(total_checks, 1)::float * 100) ELSE 0 END), 0) as avg_uptime,
+						COALESCE(AVG(COALESCE(response_time, 0)::float), 0) as avg_response_time
+					  FROM sites`
+
+		apiDatabase.QueryRow(statsQuery).Scan(&stats.SitesUp, &stats.SitesDown, &stats.AvgUptime, &stats.AvgResponseTime)
+	}
+
+	json.NewEncoder(w).Encode(stats)
+}
+
+// HandleHealthCheck - проверка здоровья системы
+func HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	health := map[string]interface{}{
+		"postgres_connected":   false,
+		"clickhouse_connected": false,
+		"timestamp":            time.Now().Format(time.RFC3339),
+	}
+
+	if apiDatabase != nil {
+		if err := apiDatabase.DB.Ping(); err == nil {
+			health["postgres_connected"] = true
+		}
+	}
+
+	// Если есть метрики сервис, проверяем ClickHouse
+	if metricsService != nil {
+		systemHealth := metricsService.GetSystemHealth()
+		if connected, ok := systemHealth["clickhouse_connected"].(bool); ok {
+			health["clickhouse_connected"] = connected
+		}
+	}
+
+	json.NewEncoder(w).Encode(health)
+}
+
+// SSEHandler - обработчик Server-Sent Events
 func SSEHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -83,11 +762,11 @@ func SSEHandler() http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		clientChan := make(chan SSEMessage, 10)
-		
+
 		<-sseClientsMutex
 		sseClients[clientChan] = true
 		sseClientsMutex <- true
-		
+
 		defer func() {
 			<-sseClientsMutex
 			delete(sseClients, clientChan)
@@ -120,12 +799,13 @@ func SSEHandler() http.HandlerFunc {
 	}
 }
 
+// BroadcastSSE - отправка SSE сообщений всем клиентам
 func BroadcastSSE(msgType string, data interface{}) {
 	message := SSEMessage{
 		Type: msgType,
 		Data: data,
 	}
-	
+
 	<-sseClientsMutex
 	for client := range sseClients {
 		select {
@@ -136,10 +816,11 @@ func BroadcastSSE(msgType string, data interface{}) {
 	sseClientsMutex <- true
 }
 
+// TriggerCheckHandler - запуск проверки по требованию
 func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("🔄 Принудительный запуск проверки всех сайтов")
-		
+
 		BroadcastSSE("check_started", map[string]string{"message": "Проверка запущена"})
 
 		go func() {
@@ -151,6 +832,7 @@ func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// AddSiteHandler - добавление нового сайта
 func AddSiteHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req AddSiteRequest
@@ -184,10 +866,10 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 			// Запускаем проверку нового сайта в фоне
 			go func() {
 				log.Printf("🔍 Запуск автоматической проверки нового сайта: %s", req.URL)
-				
+
 				// Создаем временный checker для проверки
 				checker := monitor.NewChecker(db, 0)
-				
+
 				// Получаем конфигурацию или используем базовую
 				config, err := db.GetSiteConfig(site.ID)
 				if err != nil {
@@ -196,19 +878,19 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 					defaultConfig.SiteID = site.ID
 					config = &defaultConfig
 				}
-				
+
 				// Выполняем проверку
 				result := checker.CheckSiteWithConfig(req.URL, config)
-				
+
 				// Обновляем статус в базе данных
 				checker.UpdateSiteStatus(&monitor.Site{ID: site.ID, URL: req.URL}, result)
 				checker.SaveCheckHistory(site.ID, result)
-				
+
 				// Отправляем SSE уведомление о проверке
 				if monitor.NotifySiteChecked != nil {
 					monitor.NotifySiteChecked(req.URL, result)
 				}
-				
+
 				log.Printf("✅ Автоматическая проверка нового сайта завершена: %s - %s", req.URL, result.Status)
 			}()
 		}
@@ -221,10 +903,11 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// GetAllSitesHandler - получение всех сайтов
 func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("🔍 Получение списка всех сайтов...")
-		
+
 		sites, err := db.GetAllSites()
 		if err != nil {
 			log.Printf("❌ Ошибка получения списка сайтов: %v", err)
@@ -242,18 +925,19 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 		}
 
 		log.Printf("✅ Успешно получен список из %d сайтов с конфигурациями", len(sites))
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sites)
 	}
 }
 
+// DeleteSiteByURLHandler - удаление сайта по URL
 func DeleteSiteByURLHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			URL string `json:"url"`
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -282,6 +966,7 @@ func DeleteSiteByURLHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// GetSiteStatusHandler - получение статуса сайта
 func GetSiteStatusHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -296,8 +981,8 @@ func GetSiteStatusHandler(db *database.DB) http.HandlerFunc {
 		}
 
 		response := SiteStatusResponse{
-			URL:    site.URL,
-			Status: site.Status,
+			URL:         site.URL,
+			Status:      site.Status,
 			LastChecked: site.LastChecked.Format("2006-01-02 15:04:05"),
 		}
 
@@ -306,6 +991,7 @@ func GetSiteStatusHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// CheckSiteStatus - проверка статуса сайта
 func CheckSiteStatus(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -313,6 +999,7 @@ func CheckSiteStatus(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// GetMonitoringResults - получение результатов мониторинга
 func GetMonitoringResults(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sites, err := db.GetAllSites()
@@ -328,6 +1015,7 @@ func GetMonitoringResults(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// GetSiteHistoryHandler - получение истории проверок сайта
 func GetSiteHistoryHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -354,12 +1042,13 @@ func GetSiteHistoryHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// GetDashboardStatsHandler - получение статистики дашборда
 func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("📊 Получение статистики дашборда...")
-		
+
 		stats := DashboardStats{}
-		
+
 		countQuery := `SELECT COUNT(*) FROM sites`
 		err := db.QueryRow(countQuery).Scan(&stats.TotalSites)
 		if err != nil {
@@ -369,7 +1058,7 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Ошибка получения статистики: " + err.Error()})
 			return
 		}
-		
+
 		if stats.TotalSites > 0 {
 			statsQuery := `SELECT 
 							COUNT(CASE WHEN status = 'up' THEN 1 END) as up,
@@ -377,7 +1066,7 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 							COALESCE(AVG(CASE WHEN COALESCE(total_checks, 0) > 0 THEN (COALESCE(successful_checks, 0)::float / COALESCE(total_checks, 1)::float * 100) ELSE 0 END), 0) as avg_uptime,
 							COALESCE(AVG(COALESCE(response_time, 0)::float), 0) as avg_response_time
 						  FROM sites`
-			
+
 			err = db.QueryRow(statsQuery).Scan(&stats.SitesUp, &stats.SitesDown, &stats.AvgUptime, &stats.AvgResponseTime)
 			if err != nil {
 				log.Printf("❌ Ошибка получения детальной статистики: %v", err)
@@ -396,14 +1085,16 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// GetSiteConfigHandler - получение конфигурации сайта
 func GetSiteConfigHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
 		vars := mux.Vars(r)
 		siteID := vars["id"]
 
 		var id int
 		if _, err := fmt.Sscanf(siteID, "%d", &id); err != nil {
-			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid site ID"})
 			return
@@ -422,14 +1113,16 @@ func GetSiteConfigHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
+// UpdateSiteConfigHandler - обновление конфигурации сайта
 func UpdateSiteConfigHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
 		vars := mux.Vars(r)
 		siteID := vars["id"]
 
 		var id int
 		if _, err := fmt.Sscanf(siteID, "%d", &id); err != nil {
-			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid site ID"})
 			return
@@ -454,10 +1147,24 @@ func UpdateSiteConfigHandler(db *database.DB) http.HandlerFunc {
 
 		BroadcastSSE("site_config_updated", map[string]interface{}{
 			"site_id": id,
-			"config": config,
+			"config":  config,
 		})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
+}
+
+// HourlyMetrics definition
+type HourlyMetrics struct {
+	Hour              time.Time `json:"hour"`
+	SiteID            uint32    `json:"site_id"`
+	SiteURL           string    `json:"site_url"`
+	TotalChecks       uint64    `json:"total_checks"`
+	SuccessfulChecks  uint64    `json:"successful_checks"`
+	AvgResponseTime   float64   `json:"avg_response_time"`
+	AvgDNSTime        float64   `json:"avg_dns_time"`
+	AvgConnectTime    float64   `json:"avg_connect_time"`
+	AvgTLSTime        float64   `json:"avg_tls_time"`
+	AvgTTFB           float64   `json:"avg_ttfb"`
 }

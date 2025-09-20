@@ -128,9 +128,43 @@ const demoTemplate = `<!DOCTYPE html>
 </head>
 <body>
     <div class="container">
+        <!-- Навигационная панель -->
+        <nav class="navigation">
+            <div class="nav-brand">
+                <i class="fas fa-rocket"></i>
+                Site Monitor Demo
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link">
+                    <i class="fas fa-tachometer-alt"></i> Основной дашборд
+                </a>
+                <a href="/demo" class="nav-link active demo">
+                    <i class="fas fa-rocket"></i> Live Demo
+                </a>
+                <a href="/metrics" class="nav-link metrics">
+                    <i class="fas fa-chart-bar"></i> Детальные метрики
+                </a>
+                <a href="/api/sites" class="nav-link">
+                    <i class="fas fa-code"></i> API Endpoints
+                </a>
+            </div>
+            <div class="nav-status">
+                <div class="status-dot"></div>
+                <span>Demo режим активен</span>
+            </div>
+        </nav>
+
         <div class="header">
             <h1><i class="fas fa-globe"></i> Site Monitor <span class="demo-badge">LIVE DEMO</span></h1>
             <p>Полная демонстрация функционала с реальными данными <span class="realtime-indicator"></span></p>
+            <div style="margin-top: 15px;">
+                <a href="/" class="btn btn-primary">
+                    <i class="fas fa-arrow-left"></i> К основному интерфейсу
+                </a>
+                <a href="/metrics" class="btn btn-success">
+                    <i class="fas fa-chart-line"></i> Детальная аналитика
+                </a>
+            </div>
         </div>
 
         <!-- Статистика -->
@@ -456,6 +490,9 @@ const demoTemplate = `<!DOCTYPE html>
             </button>
             <button class="btn btn-primary" onclick="window.location.href='/'">
                 <i class="fas fa-home"></i> Основной интерфейс
+            </button>
+            <button class="btn btn-info" onclick="window.location.href='/metrics'">
+                <i class="fas fa-chart-bar"></i> Детальные метрики
             </button>
             <button class="btn btn-warning" onclick="triggerCheck()">
                 <i class="fas fa-sync"></i> Проверить все сайты
