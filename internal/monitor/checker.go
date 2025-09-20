@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -54,24 +55,24 @@ type CheckResult struct {
 	Cookies       []string  `json:"cookies"`
 }
 
-// DefaultSiteConfig - базовая конфигурация для новых сайтов
+// DefaultSiteConfig - базовая конфигурация для новых сайтов - сбор всех данных каждые 5 минут
 var DefaultSiteConfig = models.SiteConfig{
-	CheckInterval: 30,
+	CheckInterval: 300, // 5 минут = 300 секунд
 	Timeout: 30,
 	ExpectedStatus: 200,
 	FollowRedirects: true,
 	MaxRedirects: 10,
 	CheckSSL: true,
 	UserAgent: "Site-Monitor/1.0",
-	CollectDNSTime: false,
-	CollectConnectTime: false,
-	CollectTLSTime: false,
-	CollectTTFB: false,
-	CollectContentHash: false,
-	CollectRedirects: false,
+	CollectDNSTime: true,
+	CollectConnectTime: true,
+	CollectTLSTime: true,
+	CollectTTFB: true,
+	CollectContentHash: true,
+	CollectRedirects: true,
 	CollectSSLDetails: true,
-	CollectServerInfo: false,
-	CollectHeaders: false,
+	CollectServerInfo: true,
+	CollectHeaders: true,
 }
 
 type Site struct {
@@ -192,14 +193,73 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		Cookies:    []string{},
 	}
 
-	client := &http.Client{
-		Timeout: time.Duration(config.Timeout) * time.Second,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
+	parsedURL, err := url.Parse(siteURL)
+	if err != nil {
+		result.Error = fmt.Sprintf("Invalid URL: %v", err)
+		return result
+	}
+
+	// Создаем кастомный transport для измерения времени соединения
+	transport := &http.Transport{
+		TLSHandshakeTimeout: time.Duration(config.Timeout/3) * time.Second,
+	}
+	
+	// Добавляем измерение DNS и TCP времени
+	if config.CollectDNSTime || config.CollectConnectTime {
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialer := &net.Dialer{
 				Timeout: time.Duration(config.Timeout/3) * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout: time.Duration(config.Timeout/3) * time.Second,
-		},
+			}
+			
+			var dnsStart time.Time
+			if config.CollectDNSTime {
+				dnsStart = time.Now()
+			}
+			
+			conn, err := dialer.DialContext(ctx, network, addr)
+			
+			if config.CollectDNSTime && err == nil {
+				result.DNSTime = time.Since(dnsStart).Milliseconds()
+				log.Printf("🔍 DNS lookup для %s: %dмс", siteURL, result.DNSTime)
+			}
+			
+			if config.CollectConnectTime && err == nil {
+				result.ConnectTime = time.Since(dnsStart).Milliseconds() - result.DNSTime
+				log.Printf("🔌 TCP connect для %s: %dмс", siteURL, result.ConnectTime)
+			}
+			
+			return conn, err
+		}
+	}
+	
+	// Добавляем измерение TLS времени для HTTPS
+	if config.CollectTLSTime && strings.HasPrefix(siteURL, "https://") {
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			tlsStart := time.Now()
+			
+			dialer := &tls.Dialer{
+				NetDialer: &net.Dialer{
+					Timeout: time.Duration(config.Timeout/3) * time.Second,
+				},
+				Config: &tls.Config{
+					ServerName: parsedURL.Hostname(),
+				},
+			}
+			
+			conn, err := dialer.DialContext(ctx, network, addr)
+			
+			if err == nil {
+				result.TLSTime = time.Since(tlsStart).Milliseconds()
+				log.Printf("🔐 TLS handshake для %s: %dмс", siteURL, result.TLSTime)
+			}
+			
+			return conn, err
+		}
+	}
+
+	client := &http.Client{
+		Timeout:   time.Duration(config.Timeout) * time.Second,
+		Transport: transport,
 	}
 
 	redirectCount := 0
@@ -233,23 +293,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		}
 	}
 
-	parsedURL, err := url.Parse(siteURL)
-	if err != nil {
-		result.Error = fmt.Sprintf("Invalid URL: %v", err)
-		return result
-	}
-
-	if config.CollectDNSTime {
-		dnsStart := time.Now()
-		ips, err := net.LookupIP(parsedURL.Hostname())
-		if err != nil {
-			result.Error = fmt.Sprintf("DNS lookup failed: %v", err)
-			return result
-		}
-		result.DNSTime = time.Since(dnsStart).Milliseconds()
-		log.Printf("🔍 DNS lookup для %s: %dмс, IP: %v", siteURL, result.DNSTime, ips[0])
-	}
-
 	if strings.HasPrefix(siteURL, "https://") && config.CollectSSLDetails {
 		log.Printf("🔒 Детальная SSL проверка для: %s", siteURL)
 		sslValid, sslExpiry, sslDetails := c.checkSSLDetailed(siteURL)
@@ -275,7 +318,7 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 	result.ResponseTime = time.Since(start).Milliseconds()
 
 	if config.CollectTTFB {
-		result.TTFB = time.Since(requestStart).Milliseconds() - result.ResponseTime
+		result.TTFB = time.Since(requestStart).Milliseconds()
 	}
 
 	if config.CollectServerInfo || config.CollectHeaders {
@@ -551,38 +594,38 @@ func (c *Checker) checkSitesWithIntervals() {
 	
 	for rows.Next() {
 		var siteID int
-		var url string
+		var siteURL string
 		var lastChecked time.Time
 		var checkInterval int
 		var enabled bool
 		
-		if err := rows.Scan(&siteID, &url, &lastChecked, &checkInterval, &enabled); err != nil {
+		if err := rows.Scan(&siteID, &siteURL, &lastChecked, &checkInterval, &enabled); err != nil {
 			log.Printf("❌ Ошибка сканирования данных сайта: %v", err)
 			continue
 		}
 		
 		nextCheck := lastChecked.Add(time.Duration(checkInterval) * time.Second)
 		if now.After(nextCheck) {
-			log.Printf("🔍 Проверка сайта %s (интервал: %d сек)", url, checkInterval)
+			log.Printf("🔍 Проверка сайта %s (интервал: %d сек)", siteURL, checkInterval)
 			
-			result := c.checkSite(url, siteID)
+			result := c.checkSite(siteURL, siteID)
 
 			if NotifySiteChecked != nil {
-				NotifySiteChecked(url, result)
+				NotifySiteChecked(siteURL, result)
 			}
 
 			if MetricsRecorder != nil {
-				MetricsRecorder(siteID, url, result, "automatic")
+				MetricsRecorder(siteID, siteURL, result, "automatic")
 			}
 		}
 	}
 }
 
 func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
-	config, err := c.db.GetSiteConfig(siteID)
+	siteConfig, err := c.db.GetSiteConfig(siteID)
 	if err != nil {
 		log.Printf("❌ Ошибка получения конфигурации для сайта %d: %v", siteID, err)
-		config = &models.SiteConfig{
+		siteConfig = &models.SiteConfig{
 			SiteID: siteID,
 			CheckInterval: 30,
 			Timeout: 30,
@@ -603,7 +646,7 @@ func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 		}
 	}
 	
-	result := c.checkSiteWithConfig(siteURL, config)
+	result := c.checkSiteWithConfig(siteURL, siteConfig)
 	
 	site := &models.Site{ID: siteID, URL: siteURL}
 	c.updateSiteStatus(site, result)

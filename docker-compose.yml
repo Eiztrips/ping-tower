@@ -30,6 +30,18 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    # Отключаем кэширование для получения свежих данных
+    command: >
+      bash -c "
+        echo '<clickhouse>
+        <query_cache_size>0</query_cache_size>
+        <uncompressed_cache_size>0</uncompressed_cache_size>
+        <mark_cache_size>0</mark_cache_size>
+        <compiled_expression_cache_size>0</compiled_expression_cache_size>
+        <query_log><database>system</database><table>query_log</table></query_log>
+        </clickhouse>' > /etc/clickhouse-server/config.d/disable-cache.xml &&
+        /entrypoint.sh
+      "
 
   app:
     build:
@@ -45,9 +57,10 @@ services:
       - CLICKHOUSE_USERNAME=default
       - CLICKHOUSE_PASSWORD=clickhouse
       - METRICS_ENABLED=true
-      - METRICS_BATCH_SIZE=100
-      - METRICS_FLUSH_INTERVAL=10
+      - METRICS_BATCH_SIZE=10
+      - METRICS_FLUSH_INTERVAL=1
       - CLICKHOUSE_DEBUG=true
+      - CHECK_INTERVAL=300
     depends_on:
       - db
       - clickhouse

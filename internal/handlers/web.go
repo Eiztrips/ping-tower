@@ -971,7 +971,26 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         function formatDate(dateString) {
-            return new Date(dateString).toLocaleString('ru-RU');
+            if (!dateString) return 'Не определено';
+            
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) {
+                    return 'Неверная дата';
+                }
+                
+                return date.toLocaleString('ru-RU', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch (error) {
+                console.error('Error formatting date:', error);
+                return 'Ошибка даты';
+            }
         }
 
         function getPerformanceClass(time) {
