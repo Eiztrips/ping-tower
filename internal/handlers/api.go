@@ -52,7 +52,11 @@ func init() {
 }
 
 func RegisterRoutes(r *mux.Router, db *database.DB) {
+	// Set database for demo handler
+	SetDemoDatabase(db)
+	
 	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
+	r.HandleFunc("/demo", DemoHandler()).Methods("GET")
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
 	r.HandleFunc("/api/sites", GetAllSitesHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{url}/status", GetSiteStatusHandler(db)).Methods("GET")
