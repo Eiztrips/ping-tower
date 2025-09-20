@@ -22,34 +22,35 @@ const webTemplate = `<!DOCTYPE html>
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             min-height: 100vh;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             padding: 20px;
         }
 
         .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
             border-radius: 20px;
             padding: 30px;
             margin-bottom: 30px;
             text-align: center;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .header h1 {
-            color: #2c3e50;
+            color: white;
             font-size: 2.5em;
             margin-bottom: 10px;
         }
 
         .header p {
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.8);
             font-size: 1.2em;
         }
 
@@ -61,13 +62,14 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
             border-radius: 15px;
             padding: 25px;
             text-align: center;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             transition: transform 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .stat-card:hover {
@@ -86,7 +88,7 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         .stat-label {
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.8);
             font-size: 0.9em;
         }
 
@@ -97,33 +99,35 @@ const webTemplate = `<!DOCTYPE html>
 
         .dashboard-content {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 2fr 1fr;
             gap: 30px;
             margin-bottom: 30px;
         }
 
         .sites-panel, .chart-panel {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
             border-radius: 20px;
             padding: 30px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .panel-title {
             font-size: 1.8em;
             margin-bottom: 20px;
-            color: #2c3e50;
+            color: white;
             display: flex;
             align-items: center;
             gap: 10px;
         }
 
         .add-site-form {
-            background: #f8f9fa;
+            background: rgba(255, 255, 255, 0.05);
             padding: 20px;
             border-radius: 15px;
             margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .form-group {
@@ -134,15 +138,23 @@ const webTemplate = `<!DOCTYPE html>
         .form-input {
             flex: 1;
             padding: 12px;
-            border: 2px solid #e9ecef;
+            border: 2px solid rgba(255, 255, 255, 0.2);
             border-radius: 10px;
             font-size: 16px;
             transition: border-color 0.3s ease;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            backdrop-filter: blur(10px);
+        }
+
+        .form-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
         }
 
         .form-input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #3498db;
+            background: rgba(255, 255, 255, 0.15);
         }
 
         .btn {
@@ -160,13 +172,13 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         .btn-primary {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(45deg, #3498db, #2980b9);
             color: white;
         }
 
         .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
         }
 
         .btn-danger {
@@ -180,18 +192,25 @@ const webTemplate = `<!DOCTYPE html>
             transform: translateY(-1px);
         }
 
+        .btn-success {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+            color: white;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
         .sites-list {
             max-height: 600px;
             overflow-y: auto;
         }
 
         .site-card {
-            background: #f8f9fa;
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
             padding: 20px;
             margin-bottom: 15px;
             transition: all 0.3s ease;
-            border-left: 5px solid #e9ecef;
+            border-left: 5px solid rgba(255, 255, 255, 0.2);
         }
 
         .site-card.up {
@@ -204,12 +223,12 @@ const webTemplate = `<!DOCTYPE html>
 
         .site-card:hover {
             transform: translateX(5px);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.1);
         }
 
         .site-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
         }
@@ -217,7 +236,7 @@ const webTemplate = `<!DOCTYPE html>
         .site-url {
             font-weight: bold;
             font-size: 1.1em;
-            color: #2c3e50;
+            color: white;
             flex: 1;
         }
 
@@ -232,12 +251,12 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         .site-status.up {
-            background: rgba(39, 174, 96, 0.1);
+            background: rgba(39, 174, 96, 0.2);
             color: #27ae60;
         }
 
         .site-status.down {
-            background: rgba(231, 76, 60, 0.1);
+            background: rgba(231, 76, 60, 0.2);
             color: #e74c3c;
         }
 
@@ -247,7 +266,7 @@ const webTemplate = `<!DOCTYPE html>
             gap: 10px;
             margin-bottom: 15px;
             font-size: 0.9em;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .detail-item {
@@ -267,340 +286,10 @@ const webTemplate = `<!DOCTYPE html>
             margin: 20px 0;
         }
 
-        @media (max-width: 1200px) {
-            .dashboard-content {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .container {
-                padding: 10px;
-            }
-            
-            .header {
-                padding: 20px;
-            }
-            
-            .header h1 {
-                font-size: 2em;
-            }
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #7f8c8d;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .ssl-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.8em;
-        }
-
-        .ssl-valid {
-            background: rgba(39, 174, 96, 0.1);
-            color: #27ae60;
-        }
-
-        .ssl-invalid {
-            background: rgba(231, 76, 60, 0.1);
-            color: #e74c3c;
-        }
-
-        .site-details-toggle {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 0.9em;
-            margin-top: 10px;
-            transition: all 0.3s ease;
-        }
-        
-        .site-details-toggle:hover {
-            background: #5a6fd8;
-            transform: translateY(-1px);
-        }
-        
-        .site-details-expanded {
-            margin-top: 15px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 15px;
-            border-left: 4px solid #667eea;
-            display: none;
-        }
-        
-        .details-section {
-            margin-bottom: 20px;
-        }
-        
-        .details-section h4 {
-            color: #2c3e50;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .details-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        
-        .detail-metric {
-            background: white;
-            padding: 12px;
-            border-radius: 8px;
-            border-left: 3px solid #3498db;
-        }
-        
-        .metric-label {
-            font-size: 0.8em;
-            color: #7f8c8d;
-            margin-bottom: 4px;
-        }
-        
-        .metric-value {
-            font-weight: bold;
-            color: #2c3e50;
-        }
-        
-        .ssl-details {
-            background: rgba(39, 174, 96, 0.1);
-            border-left-color: #27ae60;
-        }
-        
-        .ssl-details.invalid {
-            background: rgba(231, 76, 60, 0.1);
-            border-left-color: #e74c3c;
-        }
-        
-        .performance-bar {
-            background: #ecf0f1;
-            height: 8px;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 4px;
-        }
-        
-        .performance-fill {
-            height: 100%;
-            transition: width 0.3s ease;
-        }
-        
-        .perf-excellent { background: #27ae60; }
-        .perf-good { background: #f39c12; }
-        .perf-poor { background: #e74c3c; }
-        
-        .content-info {
-            background: #fff;
-            padding: 10px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 0.9em;
-            color: #555;
-        }
-        
-        .config-modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
-        
-        .config-content {
-            background-color: #fff;
-            margin: 5% auto;
-            padding: 30px;
-            border-radius: 20px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        
-        .config-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #ecf0f1;
-        }
-        
-        .config-form {
-            display: grid;
-            gap: 20px;
-        }
-        
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-        
-        .form-field {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .form-field.full-width {
-            grid-column: 1 / -1;
-        }
-        
-        .form-label {
-            font-weight: bold;
-            margin-bottom: 5px;
-            color: #2c3e50;
-            font-size: 0.9em;
-        }
-        
-        .form-control {
-            padding: 10px;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
-            font-size: 14px;
-        }
-        
-        .form-control:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .checkbox-field {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 20px;
-        }
-        
-        .checkbox-field input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-        }
-        
-        .config-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 2px solid #ecf0f1;
-        }
-        
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-        
-        .btn-secondary:hover {
-            background: #5a6268;
-        }
-        
-        .close-btn {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: #aaa;
-        }
-        
-        .close-btn:hover {
-            color: #000;
-        }
-        
-        @media (max-width: 768px) {
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-            
-            .config-content {
-                margin: 10% auto;
-                width: 95%;
-                padding: 20px;
-            }
-        }
-        
-        .config-section {
-            margin-bottom: 25px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .config-section h4 {
-            margin-bottom: 15px;
-            color: #2c3e50;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .checkbox-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-        }
-        
-        .checkbox-field {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px;
-            background: white;
-            border-radius: 5px;
-            border: 1px solid #e9ecef;
-        }
-        
-        .checkbox-field input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-        }
-        
-        @media (max-width: 768px) {
-            .checkbox-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        /* Добавляем стили для навигации */
+        /* Navigation Styles */
         .navigation {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
             border-radius: 15px;
             padding: 15px 20px;
             margin-bottom: 20px;
@@ -610,6 +299,7 @@ const webTemplate = `<!DOCTYPE html>
             flex-wrap: wrap;
             gap: 10px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .nav-brand {
@@ -617,7 +307,7 @@ const webTemplate = `<!DOCTYPE html>
             align-items: center;
             gap: 10px;
             font-weight: bold;
-            color: #2c3e50;
+            color: white;
             font-size: 1.1em;
         }
         
@@ -637,12 +327,12 @@ const webTemplate = `<!DOCTYPE html>
             font-weight: 500;
             transition: all 0.3s ease;
             border: 2px solid transparent;
+            color: rgba(255, 255, 255, 0.8);
         }
         
         .nav-link.active {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: rgba(255, 255, 255, 0.2);
             color: white;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         }
         
         .nav-link.demo {
@@ -656,15 +346,9 @@ const webTemplate = `<!DOCTYPE html>
             color: white;
         }
         
-        .nav-link:not(.active):not(.demo):not(.metrics) {
-            color: #7f8c8d;
-            border-color: #ecf0f1;
-        }
-        
         .nav-link:not(.active):not(.demo):not(.metrics):hover {
-            color: #2c3e50;
-            border-color: #3498db;
-            background: rgba(52, 152, 219, 0.1);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
         }
         
         @keyframes pulse-orange {
@@ -677,7 +361,7 @@ const webTemplate = `<!DOCTYPE html>
             align-items: center;
             gap: 8px;
             padding: 5px 10px;
-            background: rgba(39, 174, 96, 0.1);
+            background: rgba(39, 174, 96, 0.2);
             border-radius: 15px;
             font-size: 0.9em;
             color: #27ae60;
@@ -690,28 +374,16 @@ const webTemplate = `<!DOCTYPE html>
             border-radius: 50%;
             animation: pulse 1s infinite;
         }
-        
-        @media (max-width: 768px) {
-            .navigation {
-                flex-direction: column;
-                text-align: center;
-            }
-            
-            .nav-links {
-                justify-content: center;
-                flex-wrap: wrap;
-            }
-        }
 
         .loading {
             text-align: center;
             padding: 40px;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #3498db;
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -724,6 +396,11 @@ const webTemplate = `<!DOCTYPE html>
             100% { transform: rotate(360deg); }
         }
 
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .ssl-indicator {
             display: inline-flex;
             align-items: center;
@@ -734,17 +411,17 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         .ssl-valid {
-            background: rgba(39, 174, 96, 0.1);
+            background: rgba(39, 174, 96, 0.2);
             color: #27ae60;
         }
 
         .ssl-invalid {
-            background: rgba(231, 76, 60, 0.1);
+            background: rgba(231, 76, 60, 0.2);
             color: #e74c3c;
         }
 
         .site-details-toggle {
-            background: #667eea;
+            background: #3498db;
             color: white;
             border: none;
             padding: 8px 16px;
@@ -756,16 +433,16 @@ const webTemplate = `<!DOCTYPE html>
         }
         
         .site-details-toggle:hover {
-            background: #5a6fd8;
+            background: #2980b9;
             transform: translateY(-1px);
         }
         
         .site-details-expanded {
             margin-top: 15px;
             padding: 20px;
-            background: #f8f9fa;
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 15px;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #3498db;
             display: none;
         }
         
@@ -774,7 +451,7 @@ const webTemplate = `<!DOCTYPE html>
         }
         
         .details-section h4 {
-            color: #2c3e50;
+            color: white;
             margin-bottom: 10px;
             display: flex;
             align-items: center;
@@ -789,7 +466,7 @@ const webTemplate = `<!DOCTYPE html>
         }
         
         .detail-metric {
-            background: white;
+            background: rgba(255, 255, 255, 0.1);
             padding: 12px;
             border-radius: 8px;
             border-left: 3px solid #3498db;
@@ -797,13 +474,13 @@ const webTemplate = `<!DOCTYPE html>
         
         .metric-label {
             font-size: 0.8em;
-            color: #7f8c8d;
+            color: rgba(255, 255, 255, 0.7);
             margin-bottom: 4px;
         }
         
         .metric-value {
             font-weight: bold;
-            color: #2c3e50;
+            color: white;
         }
         
         .ssl-details {
@@ -817,7 +494,7 @@ const webTemplate = `<!DOCTYPE html>
         }
         
         .performance-bar {
-            background: #ecf0f1;
+            background: rgba(255, 255, 255, 0.1);
             height: 8px;
             border-radius: 4px;
             overflow: hidden;
@@ -834,12 +511,12 @@ const webTemplate = `<!DOCTYPE html>
         .perf-poor { background: #e74c3c; }
         
         .content-info {
-            background: #fff;
+            background: rgba(255, 255, 255, 0.1);
             padding: 10px;
             border-radius: 8px;
             font-family: monospace;
             font-size: 0.9em;
-            color: #555;
+            color: rgba(255, 255, 255, 0.8);
         }
         
         .config-modal {
@@ -850,11 +527,11 @@ const webTemplate = `<!DOCTYPE html>
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(0,0,0,0.7);
         }
         
         .config-content {
-            background-color: #fff;
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             margin: 5% auto;
             padding: 30px;
             border-radius: 20px;
@@ -862,6 +539,7 @@ const webTemplate = `<!DOCTYPE html>
             max-width: 600px;
             max-height: 80vh;
             overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .config-header {
@@ -870,7 +548,11 @@ const webTemplate = `<!DOCTYPE html>
             align-items: center;
             margin-bottom: 20px;
             padding-bottom: 15px;
-            border-bottom: 2px solid #ecf0f1;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .config-header h3 {
+            color: white;
         }
         
         .config-form {
@@ -896,20 +578,27 @@ const webTemplate = `<!DOCTYPE html>
         .form-label {
             font-weight: bold;
             margin-bottom: 5px;
-            color: #2c3e50;
+            color: white;
             font-size: 0.9em;
         }
         
         .form-control {
             padding: 10px;
-            border: 2px solid #e9ecef;
+            border: 2px solid rgba(255, 255, 255, 0.2);
             border-radius: 8px;
             font-size: 14px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .form-control option {
+            background: #34495e;
+            color: white;
         }
         
         .form-control:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #3498db;
         }
         
         .checkbox-field {
@@ -923,6 +612,10 @@ const webTemplate = `<!DOCTYPE html>
             width: 18px;
             height: 18px;
         }
+
+        .checkbox-field label {
+            color: white;
+        }
         
         .config-actions {
             display: flex;
@@ -930,7 +623,7 @@ const webTemplate = `<!DOCTYPE html>
             gap: 10px;
             margin-top: 25px;
             padding-top: 20px;
-            border-top: 2px solid #ecf0f1;
+            border-top: 2px solid rgba(255, 255, 255, 0.1);
         }
         
         .btn-secondary {
@@ -947,36 +640,24 @@ const webTemplate = `<!DOCTYPE html>
             border: none;
             font-size: 24px;
             cursor: pointer;
-            color: #aaa;
+            color: rgba(255, 255, 255, 0.7);
         }
         
         .close-btn:hover {
-            color: #000;
-        }
-        
-        @media (max-width: 768px) {
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-            
-            .config-content {
-                margin: 10% auto;
-                width: 95%;
-                padding: 20px;
-            }
+            color: white;
         }
         
         .config-section {
             margin-bottom: 25px;
             padding: 20px;
-            background: #f8f9fa;
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 10px;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #3498db;
         }
         
         .config-section h4 {
             margin-bottom: 15px;
-            color: #2c3e50;
+            color: white;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -993,9 +674,9 @@ const webTemplate = `<!DOCTYPE html>
             align-items: center;
             gap: 8px;
             padding: 8px;
-            background: white;
+            background: rgba(255, 255, 255, 0.1);
             border-radius: 5px;
-            border: 1px solid #e9ecef;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .checkbox-field input[type="checkbox"] {
@@ -1003,7 +684,49 @@ const webTemplate = `<!DOCTYPE html>
             height: 18px;
         }
         
+        @media (max-width: 1200px) {
+            .dashboard-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
         @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .container {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .navigation {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .nav-links {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .config-content {
+                margin: 10% auto;
+                width: 95%;
+                padding: 20px;
+            }
+
             .checkbox-grid {
                 grid-template-columns: 1fr;
             }
