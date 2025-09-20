@@ -30,7 +30,6 @@ services:
       nofile:
         soft: 262144
         hard: 262144
-    # Отключаем кэширование для получения свежих данных
     command: >
       bash -c "
         echo '<clickhouse>

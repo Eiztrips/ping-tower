@@ -199,32 +199,55 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		return result
 	}
 
-	// Создаем кастомный transport для измерения времени соединения
+	// Создаем кастомный transport с детальным измерением времени
 	transport := &http.Transport{
 		TLSHandshakeTimeout: time.Duration(config.Timeout/3) * time.Second,
 	}
 	
-	// Добавляем измерение DNS и TCP времени
+	// Переменные для измерения времени
+	var dnsStart, dnsEnd, connectStart, connectEnd, tlsStart, tlsEnd time.Time
+	
+	// Добавляем измерение DNS и TCP времени через trace
 	if config.CollectDNSTime || config.CollectConnectTime {
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			dialer := &net.Dialer{
-				Timeout: time.Duration(config.Timeout/3) * time.Second,
-			}
-			
-			var dnsStart time.Time
+			// DNS lookup начинается здесь
 			if config.CollectDNSTime {
 				dnsStart = time.Now()
 			}
 			
-			conn, err := dialer.DialContext(ctx, network, addr)
+			// Резолвим хост вручную для измерения DNS времени
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
 			
-			if config.CollectDNSTime && err == nil {
-				result.DNSTime = time.Since(dnsStart).Milliseconds()
+			// Измеряем DNS lookup
+			ips, err := net.LookupIP(host)
+			if err != nil {
+				return nil, err
+			}
+			
+			if config.CollectDNSTime {
+				dnsEnd = time.Now()
+				result.DNSTime = dnsEnd.Sub(dnsStart).Milliseconds()
 				log.Printf("🔍 DNS lookup для %s: %dмс", siteURL, result.DNSTime)
 			}
 			
+			// Измеряем TCP соединение
+			if config.CollectConnectTime {
+				connectStart = time.Now()
+			}
+			
+			// Устанавливаем TCP соединение с первым IP
+			dialer := &net.Dialer{
+				Timeout: time.Duration(config.Timeout/3) * time.Second,
+			}
+			
+			conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+			
 			if config.CollectConnectTime && err == nil {
-				result.ConnectTime = time.Since(dnsStart).Milliseconds() - result.DNSTime
+				connectEnd = time.Now()
+				result.ConnectTime = connectEnd.Sub(connectStart).Milliseconds()
 				log.Printf("🔌 TCP connect для %s: %dмс", siteURL, result.ConnectTime)
 			}
 			
@@ -234,26 +257,48 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 	
 	// Добавляем измерение TLS времени для HTTPS
 	if config.CollectTLSTime && strings.HasPrefix(siteURL, "https://") {
+		originalDialTLS := transport.DialTLSContext
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			tlsStart := time.Now()
+			tlsStart = time.Now()
 			
-			dialer := &tls.Dialer{
-				NetDialer: &net.Dialer{
+			// Если у нас уже есть кастомный DialContext, используем его для базового соединения
+			var baseConn net.Conn
+			var err error
+			
+			if transport.DialContext != nil {
+				baseConn, err = transport.DialContext(ctx, network, addr)
+			} else {
+				dialer := &net.Dialer{
 					Timeout: time.Duration(config.Timeout/3) * time.Second,
-				},
-				Config: &tls.Config{
-					ServerName: parsedURL.Hostname(),
-				},
+				}
+				baseConn, err = dialer.DialContext(ctx, network, addr)
 			}
 			
-			conn, err := dialer.DialContext(ctx, network, addr)
-			
-			if err == nil {
-				result.TLSTime = time.Since(tlsStart).Milliseconds()
-				log.Printf("🔐 TLS handshake для %s: %dмс", siteURL, result.TLSTime)
+			if err != nil {
+				return nil, err
 			}
 			
-			return conn, err
+			// Выполняем TLS handshake
+			tlsConn := tls.Client(baseConn, &tls.Config{
+				ServerName: parsedURL.Hostname(),
+			})
+			
+			err = tlsConn.Handshake()
+			if err != nil {
+				baseConn.Close()
+				return nil, err
+			}
+			
+			tlsEnd = time.Now()
+			result.TLSTime = tlsEnd.Sub(tlsStart).Milliseconds()
+			log.Printf("🔐 TLS handshake для %s: %dмс", siteURL, result.TLSTime)
+			
+			return tlsConn, nil
+		}
+		
+		// Отключаем стандартный DialTLS если был переопределен
+		if originalDialTLS != nil {
+			transport.DialTLS = nil
 		}
 	}
 
