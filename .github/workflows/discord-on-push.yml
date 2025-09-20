@@ -1,0 +1,25 @@
+name: Notify Discord on push to branch
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare payload
+        id: payload
+        run: |
+          echo "::set-output name=branch::${GITHUB_REF#refs/heads/}"
+          echo "::set-output name=commits::$(jq -c '[.head_commit | {id: .id, author: .author.name, message: .message, url: .url}]' $GITHUB_EVENT_PATH)"
+      - name: Send to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          BRANCH: ${{ steps.payload.outputs.branch }}
+          COMMITS: ${{ steps.payload.outputs.commits }}
+        run: |
+          jq -r '.[] | "Commit: \(.id[0:7])\nAuthor: \(.author)\nMessage: \(.message)\nURL: \(.url)"' <<< "$COMMITS" > /tmp/msg.txt
+          PAYLOAD=$(jq -n --arg t "Push to branch $BRANCH" --arg d "$(cat /tmp/msg.txt)" '{content: ($t + "\n\n" + $d)}')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK"
