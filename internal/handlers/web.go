@@ -508,7 +508,6 @@ const webTemplate = `<!DOCTYPE html>
         let statusChart = null;
         let eventSource = null;
         
-        // Подключаемся к Server-Sent Events
         function connectSSE() {
             if (eventSource) {
                 eventSource.close();
@@ -527,7 +526,6 @@ const webTemplate = `<!DOCTYPE html>
             
             eventSource.onerror = function(event) {
                 console.error('SSE connection error:', event);
-                // Переподключаемся через 5 секунд
                 setTimeout(connectSSE, 5000);
             };
             
@@ -595,12 +593,10 @@ const webTemplate = `<!DOCTYPE html>
             
             document.body.appendChild(notification);
             
-            // Анимация появления
             setTimeout(function() {
                 notification.style.opacity = '1';
             }, 100);
             
-            // Автоматическое удаление
             setTimeout(function() {
                 notification.style.opacity = '0';
                 setTimeout(function() {
@@ -917,8 +913,6 @@ const webTemplate = `<!DOCTYPE html>
             .then(function(data) {
                 if (data.message) {
                     document.getElementById('url').value = '';
-                    // Не вызываем loadSites() и loadDashboardStats() здесь,
-                    // потому что они будут вызваны через SSE
                 } else if (data.error) {
                     showNotification('Ошибка: ' + data.error, 'error');
                 }
@@ -941,7 +935,6 @@ const webTemplate = `<!DOCTYPE html>
                     if (data.error) {
                         showNotification('Ошибка: ' + data.error, 'error');
                     }
-                    // Успешное удаление будет обработано через SSE
                 })
                 .catch(function(error) {
                     console.error('Ошибка удаления сайта:', error);
@@ -961,7 +954,6 @@ const webTemplate = `<!DOCTYPE html>
                 if (data.error) {
                     showNotification('Ошибка: ' + data.error, 'error');
                 }
-                // Уведомление о запуске будет показано через SSE
             })
             .catch(function(error) {
                 console.error('Ошибка запуска проверки:', error);
@@ -969,17 +961,10 @@ const webTemplate = `<!DOCTYPE html>
             });
         }
 
-        // Подключаемся к SSE при загрузке страницы
         connectSSE();
         
         loadDashboardStats();
         loadSites();
-        
-        // Убираем автоматическое обновление по таймеру, так как теперь используем SSE
-        // setInterval(function() {
-        //     loadDashboardStats();
-        //     loadSites();
-        // }, 30000);
     </script>
 </body>
 </html>`

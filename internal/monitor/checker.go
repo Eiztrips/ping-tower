@@ -34,7 +34,6 @@ type CheckResult struct {
 	SSLExpiry     *time.Time
 	Error         string
 		
-	// New detailed metrics
 	DNSTime       int64     `json:"dns_time"`
 	ConnectTime   int64     `json:"connect_time"`
 	TLSTime       int64     `json:"tls_time"`
@@ -45,12 +44,10 @@ type CheckResult struct {
 	Headers       map[string]string `json:"headers"`
 	Keywords      []string  `json:"keywords_found"`
 	
-	// SSL Details
 	SSLKeyLength  int       `json:"ssl_key_length"`
 	SSLAlgorithm  string    `json:"ssl_algorithm"`
 	SSLIssuer     string    `json:"ssl_issuer"`
 	
-	// Server Info
 	ServerType    string    `json:"server_type"`
 	PoweredBy     string    `json:"powered_by"`
 	ContentType   string    `json:"content_type"`
@@ -142,14 +139,12 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		Cookies:    []string{},
 	}
 
-	// Парсим URL для детального анализа
 	parsedURL, err := url.Parse(siteURL)
 	if err != nil {
 		result.Error = fmt.Sprintf("Invalid URL: %v", err)
 		return result
 	}
 
-	// Измеряем время DNS lookup
 	dnsStart := time.Now()
 	ips, err := net.LookupIP(parsedURL.Hostname())
 	if err != nil {
@@ -159,7 +154,6 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 	result.DNSTime = time.Since(dnsStart).Milliseconds()
 	log.Printf("🔍 DNS lookup для %s: %dмс, IP: %v", siteURL, result.DNSTime, ips[0])
 
-	// SSL проверка с детальной информацией
 	if strings.HasPrefix(siteURL, "https://") {
 		log.Printf("🔒 Детальная SSL проверка для: %s", siteURL)
 		sslValid, sslExpiry, sslDetails := c.checkSSLDetailed(siteURL)
@@ -170,7 +164,6 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		result.SSLIssuer = sslDetails.Issuer
 	}
 
-	// Создаем клиент с детальным трекингом времени
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout: 10 * time.Second,
@@ -178,7 +171,6 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 
-	// Подсчет редиректов
 	redirectCount := 0
 	client := &http.Client{
 		Timeout:   30 * time.Second,
@@ -192,7 +184,6 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		},
 	}
 
-	// Выполняем запрос с замером времени
 	connectStart := time.Now()
 	resp, err := client.Get(siteURL)
 	if err != nil {
@@ -209,25 +200,21 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 	result.ResponseTime = time.Since(start).Milliseconds()
 	result.StatusCode = resp.StatusCode
 
-	// Time to First Byte (время до получения первого байта)
 	ttfbStart := time.Now()
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err == nil {
 		result.TTFB = time.Since(ttfbStart).Milliseconds()
 		result.ContentLength = int64(len(bodyBytes))
 		
-		// Вычисляем хэш контента для отслеживания изменений
 		hash := sha256.Sum256(bodyBytes)
-		result.ContentHash = fmt.Sprintf("%x", hash[:8]) // Первые 8 байт хэша
+		result.ContentHash = fmt.Sprintf("%x", hash[:8])
 		
-		// Ищем ключевые слова в контенте
 		result.Keywords = c.findKeywords(string(bodyBytes))
 		
 		log.Printf("📄 Контент %s: размер %d байт, хэш %s, ключевых слов найдено: %d", 
 			siteURL, result.ContentLength, result.ContentHash, len(result.Keywords))
 	}
 
-	// Собираем заголовки ответа
 	result.Headers = make(map[string]string)
 	for key, values := range resp.Header {
 		if len(values) > 0 {
@@ -235,13 +222,11 @@ func (c *Checker) checkSite(siteURL string) CheckResult {
 		}
 	}
 
-	// Извлекаем важную информацию из заголовков
 	result.ServerType = resp.Header.Get("Server")
 	result.PoweredBy = resp.Header.Get("X-Powered-By")
 	result.ContentType = resp.Header.Get("Content-Type")
 	result.CacheControl = resp.Header.Get("Cache-Control")
 
-	// Собираем информацию о куках
 	for _, cookie := range resp.Cookies() {
 		result.Cookies = append(result.Cookies, cookie.Name+"="+cookie.Value)
 	}
@@ -301,7 +286,6 @@ func (c *Checker) checkSSLDetailed(siteURL string) (bool, *time.Time, SSLDetails
 	cert := certs[0]
 	now := time.Now()
 	
-	// Извлекаем детальную информацию о сертификате
 	if cert.PublicKey != nil {
 		switch pub := cert.PublicKey.(type) {
 		case *rsa.PublicKey:
@@ -325,7 +309,6 @@ func (c *Checker) checkSSLDetailed(siteURL string) (bool, *time.Time, SSLDetails
 func (c *Checker) findKeywords(content string) []string {
 	keywords := []string{}
 	
-	// Список ключевых слов для поиска
 	searchWords := []string{
 		"error", "ошибка", "404", "500", "503",
 		"welcome", "добро пожаловать", "home", "главная",
@@ -408,5 +391,4 @@ func StartMonitoring(db *sql.DB, interval time.Duration) {
 	checker.Start()
 }
 
-// Функция для отправки уведомлений (будет импортирована из handlers)
 var NotifySiteChecked func(string, CheckResult)
