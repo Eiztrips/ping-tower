@@ -54,6 +54,31 @@ type CheckResult struct {
 	Cookies       []string  `json:"cookies"`
 }
 
+// DefaultSiteConfig - базовая конфигурация для новых сайтов
+var DefaultSiteConfig = models.SiteConfig{
+	CheckInterval: 30,
+	Timeout: 30,
+	ExpectedStatus: 200,
+	FollowRedirects: true,
+	MaxRedirects: 10,
+	CheckSSL: true,
+	UserAgent: "Site-Monitor/1.0",
+	CollectDNSTime: false,
+	CollectConnectTime: false,
+	CollectTLSTime: false,
+	CollectTTFB: false,
+	CollectContentHash: false,
+	CollectRedirects: false,
+	CollectSSLDetails: true,
+	CollectServerInfo: false,
+	CollectHeaders: false,
+}
+
+type Site struct {
+	ID  int
+	URL string
+}
+
 func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -146,6 +171,11 @@ func (c *Checker) checkAllSites() {
 	}
 	
 	log.Printf("✅ Проверено активных сайтов: %d", sitesCount)
+}
+
+// CheckSiteWithConfig - публичный метод для проверки сайта с конфигурацией
+func (c *Checker) CheckSiteWithConfig(siteURL string, config *models.SiteConfig) CheckResult {
+	return c.checkSiteWithConfig(siteURL, config)
 }
 
 func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig) CheckResult {
@@ -415,6 +445,12 @@ func (c *Checker) findKeywords(content string) []string {
 	return keywords
 }
 
+// UpdateSiteStatus - публичный метод для обновления статуса сайта
+func (c *Checker) UpdateSiteStatus(site *Site, result CheckResult) {
+	modelSite := &models.Site{ID: site.ID, URL: site.URL}
+	c.updateSiteStatus(modelSite, result)
+}
+
 func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 	log.Printf("💾 Обновляем детальный статус сайта %s: %s", site.URL, result.Status)
 	
@@ -459,6 +495,11 @@ func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 	} else {
 		log.Printf("✅ Детальный статус сайта %s успешно обновлен", site.URL)
 	}
+}
+
+// SaveCheckHistory - публичный метод для сохранения истории проверок
+func (c *Checker) SaveCheckHistory(siteID int, result CheckResult) {
+	c.saveCheckHistory(siteID, result)
 }
 
 func (c *Checker) saveCheckHistory(siteID int, result CheckResult) {

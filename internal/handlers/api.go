@@ -172,6 +172,43 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
+		// Получаем ID добавленного сайта для проверки
+		site, err := db.GetSiteByURL(req.URL)
+		if err != nil {
+			log.Printf("❌ Не удалось получить данные добавленного сайта: %v", err)
+		} else {
+			// Запускаем проверку нового сайта в фоне
+			go func() {
+				log.Printf("🔍 Запуск автоматической проверки нового сайта: %s", req.URL)
+				
+				// Создаем временный checker для проверки
+				checker := monitor.NewChecker(db, 0)
+				
+				// Получаем конфигурацию или используем базовую
+				config, err := db.GetSiteConfig(site.ID)
+				if err != nil {
+					// Создаем базовую конфигурацию для нового сайта
+					defaultConfig := monitor.DefaultSiteConfig
+					defaultConfig.SiteID = site.ID
+					config = &defaultConfig
+				}
+				
+				// Выполняем проверку
+				result := checker.CheckSiteWithConfig(req.URL, config)
+				
+				// Обновляем статус в базе данных
+				checker.UpdateSiteStatus(&monitor.Site{ID: site.ID, URL: req.URL}, result)
+				checker.SaveCheckHistory(site.ID, result)
+				
+				// Отправляем SSE уведомление о проверке
+				if monitor.NotifySiteChecked != nil {
+					monitor.NotifySiteChecked(req.URL, result)
+				}
+				
+				log.Printf("✅ Автоматическая проверка нового сайта завершена: %s - %s", req.URL, result.Status)
+			}()
+		}
+
 		BroadcastSSE("site_added", map[string]string{"url": req.URL})
 
 		w.Header().Set("Content-Type", "application/json")
