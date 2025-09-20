@@ -603,6 +603,10 @@ const webTemplate = `<!DOCTYPE html>
         <div class="header">
             <h1><i class="fas fa-globe"></i> Site Monitor</h1>
             <p>Профессиональный мониторинг доступности веб-сайтов</p>
+            <button class="btn btn-primary" onclick="showAboutInfo()" style="margin-top: 15px;">
+                <i class="fas fa-info-circle"></i>
+                О системе
+            </button>
         </div>
 
         <div class="stats-grid">
@@ -851,6 +855,22 @@ const webTemplate = `<!DOCTYPE html>
                     <button type="submit" class="btn btn-primary">Сохранить настройки</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- About Information Modal -->
+    <div id="aboutModal" class="config-modal">
+        <div class="config-content">
+            <div class="config-header">
+                <h3><i class="fas fa-info-circle"></i> О системе мониторинга</h3>
+                <button class="close-btn" onclick="closeAboutModal()">&times;</button>
+            </div>
+            <div id="aboutContent">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Загрузка информации о системе...
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1166,6 +1186,67 @@ const webTemplate = `<!DOCTYPE html>
         
         function closeConfigModal() {
             document.getElementById('configModal').style.display = 'none';
+        }
+
+        function showAboutInfo() {
+            document.getElementById('aboutModal').style.display = 'block';
+            document.getElementById('aboutContent').innerHTML = '<div class="loading"><div class="spinner"></div>Загрузка информации о системе...</div>';
+            
+            fetch('/api/about')
+                .then(response => response.json())
+                .then(data => {
+                    let featuresHtml = data.features.map(feature => '<li>' + feature + '</li>').join('');
+                    let capabilitiesHtml = data.capabilities.map(capability => '<li>' + capability + '</li>').join('');
+                    
+                    document.getElementById('aboutContent').innerHTML = 
+                        '<div class="config-section">' +
+                            '<h4><i class="fas fa-info"></i> Основная информация</h4>' +
+                            '<div class="details-grid">' +
+                                '<div class="detail-metric">' +
+                                    '<div class="metric-label">Название</div>' +
+                                    '<div class="metric-value">' + data.name + '</div>' +
+                                '</div>' +
+                                '<div class="detail-metric">' +
+                                    '<div class="metric-label">Версия</div>' +
+                                    '<div class="metric-value">' + data.version + '</div>' +
+                                '</div>' +
+                                '<div class="detail-metric">' +
+                                    '<div class="metric-label">Статус</div>' +
+                                    '<div class="metric-value">' + (data.status === 'running' ? '🟢 Работает' : data.status) + '</div>' +
+                                '</div>' +
+                                '<div class="detail-metric">' +
+                                    '<div class="metric-label">Время работы</div>' +
+                                    '<div class="metric-value">' + data.uptime + '</div>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div style="margin-top: 15px;">' +
+                                '<div class="metric-label">Описание</div>' +
+                                '<div class="metric-value">' + data.description + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        
+                        '<div class="config-section">' +
+                            '<h4><i class="fas fa-cogs"></i> Основные возможности</h4>' +
+                            '<ul style="margin: 0; padding-left: 20px; color: #2c3e50;">' +
+                                capabilitiesHtml +
+                            '</ul>' +
+                        '</div>' +
+                        
+                        '<div class="config-section">' +
+                            '<h4><i class="fas fa-star"></i> Детальные функции</h4>' +
+                            '<ul style="margin: 0; padding-left: 20px; color: #2c3e50;">' +
+                                featuresHtml +
+                            '</ul>' +
+                        '</div>';
+                })
+                .catch(error => {
+                    console.error('Ошибка загрузки информации о системе:', error);
+                    document.getElementById('aboutContent').innerHTML = '<div class="loading">Ошибка загрузки информации о системе</div>';
+                });
+        }
+        
+        function closeAboutModal() {
+            document.getElementById('aboutModal').style.display = 'none';
         }
 
         function generateSiteCard(site, index) {
@@ -1500,9 +1581,12 @@ const webTemplate = `<!DOCTYPE html>
         });
         
         window.onclick = function(event) {
-            const modal = document.getElementById('configModal');
-            if (event.target === modal) {
+            const configModal = document.getElementById('configModal');
+            const aboutModal = document.getElementById('aboutModal');
+            if (event.target === configModal) {
                 closeConfigModal();
+            } else if (event.target === aboutModal) {
+                closeAboutModal();
             }
         }
 

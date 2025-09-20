@@ -39,6 +39,16 @@ type DashboardStats struct {
 	AvgResponseTime float64 `json:"avg_response_time"`
 }
 
+type ApplicationInfo struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Version      string   `json:"version"`
+	Capabilities []string `json:"capabilities"`
+	Features     []string `json:"features"`
+	Status       string   `json:"status"`
+	Uptime       string   `json:"uptime"`
+}
+
 type SSEMessage struct {
 	Type string      `json:"type"`
 	Data interface{} `json:"data"`
@@ -46,6 +56,7 @@ type SSEMessage struct {
 
 var sseClients = make(map[chan SSEMessage]bool)
 var sseClientsMutex = make(chan bool, 1)
+var applicationStartTime = time.Now()
 
 func init() {
 	sseClientsMutex <- true
@@ -53,6 +64,7 @@ func init() {
 
 func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
+	r.HandleFunc("/api/about", GetApplicationInfoHandler()).Methods("GET")
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
 	r.HandleFunc("/api/sites", GetAllSitesHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{url}/status", GetSiteStatusHandler(db)).Methods("GET")
@@ -412,5 +424,63 @@ func UpdateSiteConfigHandler(db *database.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func GetApplicationInfoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("📋 Запрос информации о приложении")
+		
+		uptime := time.Since(applicationStartTime)
+		
+		appInfo := ApplicationInfo{
+			Name:        "Site Monitor",
+			Description: "Профессиональная система мониторинга веб-ресурсов 24/7",
+			Version:     "1.0.0",
+			Status:      "running",
+			Uptime:      formatUptime(uptime),
+			Capabilities: []string{
+				"Мониторинг доступности сайтов",
+				"Анализ производительности",
+				"SSL/TLS сертификаты",
+				"HTTP метрики",
+				"Real-time уведомления",
+				"Исторические данные",
+			},
+			Features: []string{
+				"DNS lookup time измерение",
+				"TCP connect time анализ", 
+				"TLS handshake мониторинг",
+				"Time to First Byte (TTFB)",
+				"Детальная диагностика SSL",
+				"Анализ HTTP заголовков",
+				"Отслеживание редиректов",
+				"Контент-анализ и хэширование",
+				"Настраиваемые интервалы проверки",
+				"Server-Sent Events (SSE)",
+				"REST API",
+				"Адаптивный веб-интерфейс",
+			},
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(appInfo)
+		
+		log.Printf("📋 Информация о приложении отправлена: %s v%s (работает %s)", 
+			appInfo.Name, appInfo.Version, appInfo.Uptime)
+	}
+}
+
+func formatUptime(duration time.Duration) string {
+	days := int(duration.Hours()) / 24
+	hours := int(duration.Hours()) % 24
+	minutes := int(duration.Minutes()) % 60
+	
+	if days > 0 {
+		return fmt.Sprintf("%d дней, %d часов, %d минут", days, hours, minutes)
+	} else if hours > 0 {
+		return fmt.Sprintf("%d часов, %d минут", hours, minutes)
+	} else {
+		return fmt.Sprintf("%d минут", minutes)
 	}
 }
