@@ -13,6 +13,24 @@ services:
       - db_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    restart: always
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: site_monitor
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
   app:
     build:
       context: .
@@ -21,8 +39,19 @@ services:
       - "8080:8080"
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/site_monitor?sslmode=disable
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_DATABASE=site_monitor
+      - CLICKHOUSE_USERNAME=default
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - METRICS_ENABLED=true
+      - METRICS_BATCH_SIZE=100
+      - METRICS_FLUSH_INTERVAL=10
+      - CLICKHOUSE_DEBUG=true
     depends_on:
       - db
+      - clickhouse
 
 volumes:
   db_data:
+  clickhouse_data:

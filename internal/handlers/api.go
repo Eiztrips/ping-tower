@@ -63,6 +63,12 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/api/sse", SSEHandler()).Methods("GET")
 	r.HandleFunc("/api/sites/{id}/config", GetSiteConfigHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{id}/config", UpdateSiteConfigHandler(db)).Methods("PUT")
+
+	r.HandleFunc("/api/metrics/sites/{id}/hourly", HandleGetHourlyMetrics).Methods("GET")
+	r.HandleFunc("/api/metrics/sites/{id}/performance", HandleGetPerformanceSummary).Methods("GET")
+	r.HandleFunc("/api/metrics/ssl/alerts", HandleGetSSLAlerts).Methods("GET")
+	r.HandleFunc("/api/metrics/health", HandleGetSystemHealth).Methods("GET")
+	r.HandleFunc("/api/metrics/stats", HandleGetMetricsStats).Methods("GET")
 }
 
 func SSEHandler() http.HandlerFunc {

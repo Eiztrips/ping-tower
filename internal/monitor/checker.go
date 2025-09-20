@@ -137,6 +137,10 @@ func (c *Checker) checkAllSites() {
 		result := c.checkSiteWithConfig(site.URL, config)
 		c.updateSiteStatus(&site, result)
 		c.saveCheckHistory(site.ID, result)
+
+		if MetricsRecorder != nil {
+			MetricsRecorder(site.ID, site.URL, result, "automatic")
+		}
 		
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -521,9 +525,13 @@ func (c *Checker) checkSitesWithIntervals() {
 			log.Printf("🔍 Проверка сайта %s (интервал: %d сек)", url, checkInterval)
 			
 			result := c.checkSite(url, siteID)
-			
+
 			if NotifySiteChecked != nil {
 				NotifySiteChecked(url, result)
+			}
+
+			if MetricsRecorder != nil {
+				MetricsRecorder(siteID, url, result, "automatic")
 			}
 		}
 	}
@@ -564,3 +572,4 @@ func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 }
 
 var NotifySiteChecked func(string, CheckResult)
+var MetricsRecorder func(int, string, CheckResult, string)
