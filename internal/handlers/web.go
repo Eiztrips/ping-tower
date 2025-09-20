@@ -1045,6 +1045,13 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         function triggerCheck() {
+            // Показываем индикаторы загрузки при ручной проверке
+            document.getElementById('sitesList').innerHTML = '<div class="loading"><div class="spinner"></div>Проверка сайтов...</div>';
+            document.getElementById('sitesUp').textContent = '-';
+            document.getElementById('sitesDown').textContent = '-';
+            document.getElementById('avgUptime').textContent = '-';
+            document.getElementById('avgResponse').textContent = '-';
+            
             fetch('/api/check', {
                 method: 'POST'
             })
@@ -1054,11 +1061,20 @@ const webTemplate = `<!DOCTYPE html>
             .then(function(data) {
                 if (data.error) {
                     showNotification('Ошибка: ' + data.error, 'error');
+                } else {
+                    // Ждем немного, чтобы проверка успела выполниться
+                    setTimeout(function() {
+                        loadSites();
+                        loadDashboardStats();
+                    }, 2000);
                 }
             })
             .catch(function(error) {
                 console.error('Ошибка запуска проверки:', error);
                 showNotification('Ошибка запуска проверки', 'error');
+                // Восстанавливаем данные при ошибке
+                loadSites();
+                loadDashboardStats();
             });
         }
 
@@ -1500,7 +1516,7 @@ const webTemplate = `<!DOCTYPE html>
             }
         }
 
-        // Initialize application
+        // Initialize application - убираем автообновление
         connectSSE();
         loadDashboardStats();
         loadSites();

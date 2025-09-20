@@ -21,7 +21,6 @@ import (
 
 type Checker struct {
 	db       *database.DB
-	interval time.Duration
 	client   *http.Client
 }
 
@@ -70,30 +69,15 @@ func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	}
 
 	return &Checker{
-		db:       db,
-		interval: interval,
-		client:   client,
+		db:     db,
+		client: client,
 	}
 }
 
-func (c *Checker) Start() {
-	log.Println("🔍 Запуск мониторинга сайтов...")
-	
-	log.Println("▶️ Выполняем первичную проверку всех сайтов...")
+// CheckAllSitesOnDemand - проверка всех сайтов по требованию
+func (c *Checker) CheckAllSitesOnDemand() {
+	log.Println("🔍 Запуск проверки по требованию...")
 	c.checkAllSites()
-	
-	ticker := time.NewTicker(c.interval)
-	defer ticker.Stop()
-	
-	log.Printf("⏰ Настроен интервал проверки: %v", c.interval)
-
-	for {
-		select {
-		case <-ticker.C:
-			log.Println("🔄 Запуск периодической проверки...")
-			c.checkAllSites()
-		}
-	}
 }
 
 func (c *Checker) checkAllSites() {
@@ -125,7 +109,7 @@ func (c *Checker) checkAllSites() {
 		}
 		
 		sitesCount++
-		log.Printf("🔍 Проверяем сайт: %s (ID: %d, интервал: %ds)", site.URL, site.ID, checkInterval)
+		log.Printf("🔍 Проверяем сайт: %s (ID: %d)", site.URL, site.ID)
 		
 		config, err := c.db.GetSiteConfig(site.ID)
 		if err != nil {
@@ -488,7 +472,6 @@ func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 		log.Printf("❌ Ошибка обновления детального статуса сайта %s: %v", site.URL, err)
 	} else {
 		log.Printf("✅ Детальный статус сайта %s успешно обновлен", site.URL)
-		NotifySiteChecked(site.URL, result)
 	}
 }
 
@@ -504,9 +487,106 @@ func (c *Checker) saveCheckHistory(siteID int, result CheckResult) {
 	}
 }
 
-func StartMonitoring(db *database.DB, interval time.Duration) {
-	checker := NewChecker(db, interval)
-	checker.Start()
+// CheckOnDemand - создать инстанс checker и выполнить проверку
+func CheckOnDemand(db *database.DB) {
+	checker := NewChecker(db, 0) // interval не используется
+	checker.CheckAllSitesOnDemand()
+}
+
+// StartPeriodicMonitoring - запуск фонового мониторинга с индивидуальными интервалами
+func StartPeriodicMonitoring(db *database.DB) {
+	checker := NewChecker(db, 0)
+	
+	go func() {
+		log.Println("🔄 Запуск фонового мониторинга...")
+		
+		for {
+			checker.checkSitesWithIntervals()
+			time.Sleep(1 * time.Second) // проверяем каждую секунду, нужно ли кого-то проверить
+		}
+	}()
+}
+
+// checkSitesWithIntervals - проверка сайтов согласно их индивидуальным интервалам
+func (c *Checker) checkSitesWithIntervals() {
+	rows, err := c.db.Query(`
+		SELECT s.id, s.url, s.last_checked, 
+			   COALESCE(c.check_interval, 30) as check_interval,
+			   COALESCE(c.enabled, true) as enabled
+		FROM sites s 
+		LEFT JOIN site_configs c ON s.id = c.site_id 
+		WHERE COALESCE(c.enabled, true) = true
+	`)
+	if err != nil {
+		log.Printf("❌ Ошибка получения списка сайтов для проверки: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	now := time.Now()
+	
+	for rows.Next() {
+		var siteID int
+		var url string
+		var lastChecked time.Time
+		var checkInterval int
+		var enabled bool
+		
+		if err := rows.Scan(&siteID, &url, &lastChecked, &checkInterval, &enabled); err != nil {
+			log.Printf("❌ Ошибка сканирования данных сайта: %v", err)
+			continue
+		}
+		
+		// Проверяем, нужно ли проверить сайт
+		nextCheck := lastChecked.Add(time.Duration(checkInterval) * time.Second)
+		if now.After(nextCheck) {
+			log.Printf("🔍 Проверка сайта %s (интервал: %d сек)", url, checkInterval)
+			
+			result := c.checkSite(url, siteID)
+			
+			// Уведомляем через SSE
+			if NotifySiteChecked != nil {
+				NotifySiteChecked(url, result)
+			}
+		}
+	}
+}
+
+// checkSite - проверка одного сайта с получением его конфигурации
+func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
+	config, err := c.db.GetSiteConfig(siteID)
+	if err != nil {
+		log.Printf("❌ Ошибка получения конфигурации для сайта %d: %v", siteID, err)
+		config = &models.SiteConfig{
+			SiteID: siteID,
+			CheckInterval: 30,
+			Timeout: 30,
+			ExpectedStatus: 200,
+			FollowRedirects: true,
+			MaxRedirects: 10,
+			CheckSSL: true,
+			UserAgent: "Site-Monitor/1.0",
+			// Conservative defaults - only basic metrics
+			CollectDNSTime: false,
+			CollectConnectTime: false,
+			CollectTLSTime: false,
+			CollectTTFB: false,
+			CollectContentHash: false,
+			CollectRedirects: false,
+			CollectSSLDetails: true,
+			CollectServerInfo: false,
+			CollectHeaders: false,
+		}
+	}
+	
+	result := c.checkSiteWithConfig(siteURL, config)
+	
+	// Обновляем статус сайта в базе данных
+	site := &models.Site{ID: siteID, URL: siteURL}
+	c.updateSiteStatus(site, result)
+	c.saveCheckHistory(siteID, result)
+	
+	return result
 }
 
 var NotifySiteChecked func(string, CheckResult)

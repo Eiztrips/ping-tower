@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"site-monitor/internal/database"
 	"site-monitor/internal/models"
+	"site-monitor/internal/monitor"
 	"fmt"
 	"log"
 	"time"
@@ -127,15 +128,14 @@ func BroadcastSSE(msgType string, data interface{}) {
 
 func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := db.TriggerCheck()
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(ErrorResponse{Error: "Ошибка запуска проверки"})
-			return
-		}
-
+		log.Println("🔄 Принудительный запуск проверки всех сайтов")
+		
 		BroadcastSSE("check_started", map[string]string{"message": "Проверка запущена"})
+
+		// Запускаем проверку в фоне
+		go func() {
+			monitor.CheckOnDemand(db)
+		}()
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(SuccessResponse{Message: "Проверка инициирована"})
@@ -177,8 +177,9 @@ func AddSiteHandler(db *database.DB) http.HandlerFunc {
 
 func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("🔍 Получение списка всех сайтов с конфигурациями...")
+		log.Println("🔍 Получение списка всех сайтов...")
 		
+		// Убираем автоматическую проверку - только получаем данные
 		sites, err := db.GetAllSites()
 		if err != nil {
 			log.Printf("❌ Ошибка получения списка сайтов: %v", err)
@@ -299,6 +300,7 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("📊 Получение статистики дашборда...")
 		
+		// Убираем автоматическую проверку - только получаем статистику
 		stats := DashboardStats{}
 		
 		countQuery := `SELECT COUNT(*) FROM sites`

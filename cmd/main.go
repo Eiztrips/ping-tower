@@ -20,8 +20,8 @@ func main() {
         log.Fatalf("Ошибка загрузки конфигурации: %v", err)
     }
 
-    log.Printf("⚙️ Конфигурация: DB=%s, Port=%s, Interval=%v", 
-        cfg.DatabaseURL, cfg.ServerAddress, cfg.CheckInterval)
+    log.Printf("⚙️ Конфигурация: DB=%s, Port=%s", 
+        cfg.DatabaseURL, cfg.ServerAddress)
 
     db, err := database.NewDB(cfg.DatabaseURL)
     if err != nil {
@@ -41,15 +41,15 @@ func main() {
         })
     }
 
+    // Запускаем фоновый мониторинг с индивидуальными интервалами
+    monitor.StartPeriodicMonitoring(db)
+
     r := mux.NewRouter()
     handlers.RegisterRoutes(r, db)
-
-    time.Sleep(2 * time.Second)
-    
-    log.Printf("🔍 Запуск мониторинга с интервалом %v", cfg.CheckInterval)
-    go monitor.StartMonitoring(db, cfg.CheckInterval)
     
     log.Printf("🌐 Сервер запущен на http://localhost%s", cfg.ServerAddress)
+    log.Println("� Фоновый мониторинг запущен с индивидуальными интервалами")
+    
     if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {
         log.Fatalf("Ошибка запуска сервера: %v", err)
     }
