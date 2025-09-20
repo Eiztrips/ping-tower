@@ -74,7 +74,6 @@ func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	}
 }
 
-// CheckAllSitesOnDemand - проверка всех сайтов по требованию
 func (c *Checker) CheckAllSitesOnDemand() {
 	log.Println("🔍 Запуск проверки по требованию...")
 	c.checkAllSites()
@@ -123,7 +122,6 @@ func (c *Checker) checkAllSites() {
 				MaxRedirects: 10,
 				CheckSSL: true,
 				UserAgent: "Site-Monitor/1.0",
-				// Conservative defaults - only basic metrics
 				CollectDNSTime: false,
 				CollectConnectTime: false,
 				CollectTLSTime: false,
@@ -160,7 +158,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		Cookies:    []string{},
 	}
 
-	// Use config for timeout
 	client := &http.Client{
 		Timeout: time.Duration(config.Timeout) * time.Second,
 		Transport: &http.Transport{
@@ -171,7 +168,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		},
 	}
 
-	// Handle redirects based on config
 	redirectCount := 0
 	if config.FollowRedirects {
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -187,7 +183,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		}
 	}
 
-	// Create request with custom User-Agent
 	req, err := http.NewRequest("GET", siteURL, nil)
 	if err != nil {
 		result.Error = fmt.Sprintf("Invalid request: %v", err)
@@ -198,7 +193,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		req.Header.Set("User-Agent", config.UserAgent)
 	}
 
-	// Add custom headers
 	for key, value := range config.Headers {
 		if strValue, ok := value.(string); ok {
 			req.Header.Set(key, strValue)
@@ -211,7 +205,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		return result
 	}
 
-	// DNS lookup only if enabled
 	if config.CollectDNSTime {
 		dnsStart := time.Now()
 		ips, err := net.LookupIP(parsedURL.Hostname())
@@ -223,7 +216,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		log.Printf("🔍 DNS lookup для %s: %dмс, IP: %v", siteURL, result.DNSTime, ips[0])
 	}
 
-	// SSL check only if enabled
 	if strings.HasPrefix(siteURL, "https://") && config.CollectSSLDetails {
 		log.Printf("🔒 Детальная SSL проверка для: %s", siteURL)
 		sslValid, sslExpiry, sslDetails := c.checkSSLDetailed(siteURL)
@@ -236,7 +228,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		}
 	}
 
-	// Collect performance metrics based on config
 	requestStart := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -249,12 +240,10 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 	result.StatusCode = resp.StatusCode
 	result.ResponseTime = time.Since(start).Milliseconds()
 
-	// Collect timing metrics based on configuration
 	if config.CollectTTFB {
 		result.TTFB = time.Since(requestStart).Milliseconds() - result.ResponseTime
 	}
 
-	// Server info collection based on config
 	if config.CollectServerInfo || config.CollectHeaders {
 		if server := resp.Header.Get("Server"); server != "" && config.CollectServerInfo {
 			result.ServerType = server
@@ -270,13 +259,11 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		}
 	}
 
-	// Redirect tracking based on config
 	if config.CollectRedirects {
 		result.RedirectCount = redirectCount
 		result.FinalURL = resp.Request.URL.String()
 	}
 
-	// Check expected status
 	statusValid := false
 	if config.ExpectedStatus == 0 {
 		statusValid = resp.StatusCode >= 200 && resp.StatusCode < 400
@@ -284,23 +271,19 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		statusValid = resp.StatusCode == config.ExpectedStatus
 	}
 
-	// Read response body for content checks
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err == nil {
 		result.ContentLength = int64(len(bodyBytes))
 		
-		// Content hash only if enabled
 		if config.CollectContentHash {
 			hash := sha256.Sum256(bodyBytes)
 			result.ContentHash = fmt.Sprintf("%x", hash[:8])
 		}
 		
-		// Check keywords if configured
 		if config.CheckKeywords != "" || config.AvoidKeywords != "" {
 			content := string(bodyBytes)
 			contentLower := strings.ToLower(content)
 			
-			// Check required keywords
 			if config.CheckKeywords != "" {
 				keywords := strings.Split(config.CheckKeywords, ",")
 				keywordFound := false
@@ -317,7 +300,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 				}
 			}
 			
-			// Check avoid keywords
 			if config.AvoidKeywords != "" {
 				avoidWords := strings.Split(config.AvoidKeywords, ",")
 				for _, word := range avoidWords {
@@ -487,13 +469,11 @@ func (c *Checker) saveCheckHistory(siteID int, result CheckResult) {
 	}
 }
 
-// CheckOnDemand - создать инстанс checker и выполнить проверку
 func CheckOnDemand(db *database.DB) {
-	checker := NewChecker(db, 0) // interval не используется
+	checker := NewChecker(db, 0)
 	checker.CheckAllSitesOnDemand()
 }
 
-// StartPeriodicMonitoring - запуск фонового мониторинга с индивидуальными интервалами
 func StartPeriodicMonitoring(db *database.DB) {
 	checker := NewChecker(db, 0)
 	
@@ -502,12 +482,11 @@ func StartPeriodicMonitoring(db *database.DB) {
 		
 		for {
 			checker.checkSitesWithIntervals()
-			time.Sleep(1 * time.Second) // проверяем каждую секунду, нужно ли кого-то проверить
+			time.Sleep(1 * time.Second)
 		}
 	}()
 }
 
-// checkSitesWithIntervals - проверка сайтов согласно их индивидуальным интервалам
 func (c *Checker) checkSitesWithIntervals() {
 	rows, err := c.db.Query(`
 		SELECT s.id, s.url, s.last_checked, 
@@ -537,14 +516,12 @@ func (c *Checker) checkSitesWithIntervals() {
 			continue
 		}
 		
-		// Проверяем, нужно ли проверить сайт
 		nextCheck := lastChecked.Add(time.Duration(checkInterval) * time.Second)
 		if now.After(nextCheck) {
 			log.Printf("🔍 Проверка сайта %s (интервал: %d сек)", url, checkInterval)
 			
 			result := c.checkSite(url, siteID)
 			
-			// Уведомляем через SSE
 			if NotifySiteChecked != nil {
 				NotifySiteChecked(url, result)
 			}
@@ -552,7 +529,6 @@ func (c *Checker) checkSitesWithIntervals() {
 	}
 }
 
-// checkSite - проверка одного сайта с получением его конфигурации
 func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 	config, err := c.db.GetSiteConfig(siteID)
 	if err != nil {
@@ -566,7 +542,6 @@ func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 			MaxRedirects: 10,
 			CheckSSL: true,
 			UserAgent: "Site-Monitor/1.0",
-			// Conservative defaults - only basic metrics
 			CollectDNSTime: false,
 			CollectConnectTime: false,
 			CollectTLSTime: false,
@@ -581,7 +556,6 @@ func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 	
 	result := c.checkSiteWithConfig(siteURL, config)
 	
-	// Обновляем статус сайта в базе данных
 	site := &models.Site{ID: siteID, URL: siteURL}
 	c.updateSiteStatus(site, result)
 	c.saveCheckHistory(siteID, result)

@@ -1045,7 +1045,6 @@ const webTemplate = `<!DOCTYPE html>
         }
 
         function triggerCheck() {
-            // Показываем индикаторы загрузки при ручной проверке
             document.getElementById('sitesList').innerHTML = '<div class="loading"><div class="spinner"></div>Проверка сайтов...</div>';
             document.getElementById('sitesUp').textContent = '-';
             document.getElementById('sitesDown').textContent = '-';
@@ -1062,7 +1061,6 @@ const webTemplate = `<!DOCTYPE html>
                 if (data.error) {
                     showNotification('Ошибка: ' + data.error, 'error');
                 } else {
-                    // Ждем немного, чтобы проверка успела выполниться
                     setTimeout(function() {
                         loadSites();
                         loadDashboardStats();
@@ -1072,7 +1070,6 @@ const webTemplate = `<!DOCTYPE html>
             .catch(function(error) {
                 console.error('Ошибка запуска проверки:', error);
                 showNotification('Ошибка запуска проверки', 'error');
-                // Восстанавливаем данные при ошибке
                 loadSites();
                 loadDashboardStats();
             });
@@ -1080,14 +1077,23 @@ const webTemplate = `<!DOCTYPE html>
 
         function deleteSite(url) {
             if (confirm('Вы уверены, что хотите удалить этот сайт из мониторинга?')) {
-                fetch('/api/sites/' + encodeURIComponent(url), {
-                    method: 'DELETE'
+                fetch('/api/sites/delete', {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url: url })
                 })
                 .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
                     return response.json();
                 })
                 .then(function(data) {
-                    if (data.error) {
+                    if (data.message) {
+                        showNotification(data.message, 'success');
+                    } else if (data.error) {
                         showNotification('Ошибка: ' + data.error, 'error');
                     }
                 })
@@ -1111,14 +1117,12 @@ const webTemplate = `<!DOCTYPE html>
             }
         }
 
-        // Configuration Modal Functions
         function openConfigModal(siteId) {
             document.getElementById('configSiteId').value = siteId;
             
             fetch('/api/sites/' + siteId + '/config')
                 .then(response => response.json())
                 .then(config => {
-                    // Basic settings
                     document.getElementById('checkInterval').value = config.check_interval || 30;
                     document.getElementById('timeout').value = config.timeout || 30;
                     document.getElementById('expectedStatus').value = config.expected_status || 200;
@@ -1128,7 +1132,6 @@ const webTemplate = `<!DOCTYPE html>
                     document.getElementById('avoidKeywords').value = config.avoid_keywords || '';
                     document.getElementById('sslAlertDays').value = config.ssl_alert_days || 30;
                     
-                    // Collection flags - conservative defaults
                     document.getElementById('collectDNSTime').checked = config.collect_dns_time === true;
                     document.getElementById('collectConnectTime').checked = config.collect_connect_time === true;
                     document.getElementById('collectTLSTime').checked = config.collect_tls_time === true;
@@ -1138,8 +1141,6 @@ const webTemplate = `<!DOCTYPE html>
                     document.getElementById('collectSSLDetails').checked = config.collect_ssl_details !== false;
                     document.getElementById('collectServerInfo').checked = config.collect_server_info === true;
                     document.getElementById('collectHeaders').checked = config.collect_headers === true;
-                    
-                    // Display flags - basic metrics only
                     document.getElementById('showResponseTime').checked = config.show_response_time !== false;
                     document.getElementById('showContentLength').checked = config.show_content_length !== false;
                     document.getElementById('showUptime').checked = config.show_uptime !== false;
@@ -1149,7 +1150,6 @@ const webTemplate = `<!DOCTYPE html>
                     document.getElementById('showRedirectInfo').checked = config.show_redirect_info === true;
                     document.getElementById('showContentInfo').checked = config.show_content_info === true;
                     
-                    // Basic flags
                     document.getElementById('enabled').checked = config.enabled !== false;
                     document.getElementById('followRedirects').checked = config.follow_redirects !== false;
                     document.getElementById('checkSSL').checked = config.check_ssl !== false;
@@ -1178,7 +1178,6 @@ const webTemplate = `<!DOCTYPE html>
             
             let detailsHtml = '';
             
-            // Show only enabled metrics
             if (config.show_response_time !== false && site.response_time_ms) {
                 detailsHtml += '<div class="detail-item"><i class="fas fa-clock"></i> ' + formatTime(site.response_time_ms) + '</div>';
             }
@@ -1226,7 +1225,6 @@ const webTemplate = `<!DOCTYPE html>
         function generateDetailedInfo(site, config) {
             var detailsHtml = '';
             
-            // Performance section - only if enabled
             if (config.show_performance !== false) {
                 detailsHtml += 
                     '<div class="details-section">' +
@@ -1272,7 +1270,6 @@ const webTemplate = `<!DOCTYPE html>
                 detailsHtml += '</div></div>';
             }
             
-            // SSL section - only if enabled and HTTPS
             if (site.url.startsWith('https://') && config.show_ssl_info !== false && config.collect_ssl_details !== false) {
                 detailsHtml += 
                 '<div class="details-section">' +
@@ -1314,7 +1311,6 @@ const webTemplate = `<!DOCTYPE html>
                 detailsHtml += '</div></div>';
             }
             
-            // Server info section - only if enabled
             if (config.show_server_info !== false && config.collect_server_info !== false) {
                 detailsHtml += 
                     '<div class="details-section">' +
@@ -1358,7 +1354,6 @@ const webTemplate = `<!DOCTYPE html>
                 detailsHtml += '</div></div>';
             }
             
-            // Redirect section - only if enabled
             if (config.show_redirect_info !== false && config.collect_redirects !== false) {
                 detailsHtml += 
                     '<div class="details-section">' +
@@ -1380,7 +1375,6 @@ const webTemplate = `<!DOCTYPE html>
                 detailsHtml += '</div></div>';
             }
             
-            // Content section - only if enabled
             if (config.show_content_info !== false) {
                 detailsHtml += 
                     '<div class="details-section">' +
@@ -1417,7 +1411,6 @@ const webTemplate = `<!DOCTYPE html>
                 });
         }
 
-        // Event Listeners
         document.getElementById('addSiteForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const url = document.getElementById('url').value;
@@ -1464,7 +1457,6 @@ const webTemplate = `<!DOCTYPE html>
                 enabled: document.getElementById('enabled').checked,
                 notify_on_down: document.getElementById('notifyOnDown').checked,
                 notify_on_up: document.getElementById('notifyOnUp').checked,
-                // Collection flags
                 collect_dns_time: document.getElementById('collectDNSTime').checked,
                 collect_connect_time: document.getElementById('collectConnectTime').checked,
                 collect_tls_time: document.getElementById('collectTLSTime').checked,
@@ -1474,7 +1466,6 @@ const webTemplate = `<!DOCTYPE html>
                 collect_ssl_details: document.getElementById('collectSSLDetails').checked,
                 collect_server_info: document.getElementById('collectServerInfo').checked,
                 collect_headers: document.getElementById('collectHeaders').checked,
-                // Display flags
                 show_response_time: document.getElementById('showResponseTime').checked,
                 show_content_length: document.getElementById('showContentLength').checked,
                 show_uptime: document.getElementById('showUptime').checked,
@@ -1497,7 +1488,7 @@ const webTemplate = `<!DOCTYPE html>
                 if (data.status === 'ok') {
                     showNotification('Настройки сохранены успешно', 'success');
                     closeConfigModal();
-                    loadSites(); // Reload to apply display changes
+                    loadSites();
                 } else {
                     showNotification('Ошибка: ' + (data.error || 'Неизвестная ошибка'), 'error');
                 }
@@ -1508,7 +1499,6 @@ const webTemplate = `<!DOCTYPE html>
             });
         });
         
-        // Close modal on outside click
         window.onclick = function(event) {
             const modal = document.getElementById('configModal');
             if (event.target === modal) {
@@ -1516,7 +1506,6 @@ const webTemplate = `<!DOCTYPE html>
             }
         }
 
-        // Initialize application - убираем автообновление
         connectSSE();
         loadDashboardStats();
         loadSites();

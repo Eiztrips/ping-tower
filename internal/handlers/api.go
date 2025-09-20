@@ -56,7 +56,7 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
 	r.HandleFunc("/api/sites", GetAllSitesHandler(db)).Methods("GET")
 	r.HandleFunc("/api/sites/{url}/status", GetSiteStatusHandler(db)).Methods("GET")
-	r.HandleFunc("/api/sites/{url}", DeleteSiteHandler(db)).Methods("DELETE")
+	r.HandleFunc("/api/sites/delete", DeleteSiteByURLHandler(db)).Methods("DELETE")
 	r.HandleFunc("/api/sites/{id}/history", GetSiteHistoryHandler(db)).Methods("GET")
 	r.HandleFunc("/api/dashboard/stats", GetDashboardStatsHandler(db)).Methods("GET")
 	r.HandleFunc("/api/check", TriggerCheckHandler(db)).Methods("POST")
@@ -132,7 +132,6 @@ func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 		
 		BroadcastSSE("check_started", map[string]string{"message": "Проверка запущена"})
 
-		// Запускаем проверку в фоне
 		go func() {
 			monitor.CheckOnDemand(db)
 		}()
@@ -179,7 +178,6 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("🔍 Получение списка всех сайтов...")
 		
-		// Убираем автоматическую проверку - только получаем данные
 		sites, err := db.GetAllSites()
 		if err != nil {
 			log.Printf("❌ Ошибка получения списка сайтов: %v", err)
@@ -189,7 +187,6 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 			return
 		}
 
-		// Load configurations for each site
 		for i, site := range sites {
 			config, err := db.GetSiteConfig(site.ID)
 			if err == nil {
@@ -204,23 +201,37 @@ func GetAllSitesHandler(db *database.DB) http.HandlerFunc {
 	}
 }
 
-func DeleteSiteHandler(db *database.DB) http.HandlerFunc {
+func DeleteSiteByURLHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		url := vars["url"]
+		var req struct {
+			URL string `json:"url"`
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
 
-		err := db.DeleteSite(url)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "Неверный формат запроса"})
+			return
+		}
+
+		if req.URL == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "URL обязателен"})
+			return
+		}
+
+		err := db.DeleteSite(req.URL)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(ErrorResponse{Error: "Сайт не найден"})
 			return
 		}
 
-		BroadcastSSE("site_deleted", map[string]string{"url": url})
+		BroadcastSSE("site_deleted", map[string]string{"url": req.URL})
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(SuccessResponse{Message: "Сайт удален из мониторинга"})
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(SuccessResponse{Message: "Сайт успешно удален из мониторинга"})
 	}
 }
 
@@ -300,7 +311,6 @@ func GetDashboardStatsHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("📊 Получение статистики дашборда...")
 		
-		// Убираем автоматическую проверку - только получаем статистику
 		stats := DashboardStats{}
 		
 		countQuery := `SELECT COUNT(*) FROM sites`

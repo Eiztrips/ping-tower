@@ -56,7 +56,6 @@ type SiteConfig struct {
 	NotifyOnDown     bool                   `json:"notify_on_down"`
 	NotifyOnUp       bool                   `json:"notify_on_up"`
 	
-	// Metric collection flags
 	CollectDNSTime       bool `json:"collect_dns_time"`
 	CollectConnectTime   bool `json:"collect_connect_time"`
 	CollectTLSTime       bool `json:"collect_tls_time"`
@@ -67,7 +66,6 @@ type SiteConfig struct {
 	CollectServerInfo    bool `json:"collect_server_info"`
 	CollectHeaders       bool `json:"collect_headers"`
 	
-	// Display flags
 	ShowResponseTime     bool `json:"show_response_time"`
 	ShowContentLength    bool `json:"show_content_length"`
 	ShowUptime          bool `json:"show_uptime"`

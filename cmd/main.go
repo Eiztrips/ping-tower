@@ -29,7 +29,6 @@ func main() {
     }
     defer db.Close()
 
-    // Настраиваем связь между модулями для SSE уведомлений
     monitor.NotifySiteChecked = func(url string, result monitor.CheckResult) {
         handlers.BroadcastSSE("site_checked", map[string]interface{}{
             "url": url,
@@ -41,7 +40,6 @@ func main() {
         })
     }
 
-    // Запускаем фоновый мониторинг с индивидуальными интервалами
     monitor.StartPeriodicMonitoring(db)
 
     r := mux.NewRouter()
