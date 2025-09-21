@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"site-monitor/internal/models"
+	"ping-tower/internal/models"
 
 	_ "github.com/lib/pq"
 )

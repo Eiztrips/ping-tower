@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"site-monitor/internal/models"
-	"site-monitor/internal/database"
+	"ping-tower/internal/models"
+	"ping-tower/internal/database"
 	_ "github.com/lib/pq"
 )
 

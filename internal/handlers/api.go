@@ -37,9 +37,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"site-monitor/internal/database"
-	"site-monitor/internal/models"
-	"site-monitor/internal/monitor"
+	"ping-tower/internal/database"
+	"ping-tower/internal/models"
+	"ping-tower/internal/monitor"
 	"strconv"
 	"time"
 
