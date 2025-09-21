@@ -751,6 +751,9 @@ const webTemplate = `<!DOCTYPE html>
                 <a href="/metrics" class="nav-link metrics">
                     <i class="fas fa-chart-bar"></i> Метрики
                 </a>
+                <a href="/alerts" class="nav-link">
+                    <i class="fas fa-bell"></i> Оповещения
+                </a>
                 <a href="/api/sites" class="nav-link">
                     <i class="fas fa-code"></i> API
                 </a>

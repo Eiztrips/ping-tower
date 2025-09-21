@@ -3,8 +3,9 @@ package config
 import (
 	"log"
 	"os"
-	"time"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -15,6 +16,7 @@ type Config struct {
 	CheckInterval  time.Duration
 	ClickHouse     ClickHouseConfig
 	Metrics        MetricsConfig
+	Alerts         AlertsConfig
 }
 
 type ClickHouseConfig struct {
@@ -30,6 +32,36 @@ type MetricsConfig struct {
 	Enabled       bool
 	BatchSize     int
 	FlushInterval time.Duration
+}
+
+type AlertsConfig struct {
+	Enabled   bool
+	Email     EmailAlertConfig
+	Webhook   WebhookAlertConfig
+	Telegram  TelegramAlertConfig
+}
+
+type EmailAlertConfig struct {
+	Enabled    bool
+	SMTPServer string
+	Port       string
+	Username   string
+	Password   string
+	From       string
+	To         []string
+}
+
+type WebhookAlertConfig struct {
+	Enabled bool
+	URL     string
+	Headers map[string]string
+	Timeout int
+}
+
+type TelegramAlertConfig struct {
+	Enabled bool
+	BotToken string
+	ChatID   string
 }
 
 func LoadConfig() (*Config, error) {
@@ -70,6 +102,52 @@ func LoadConfig() (*Config, error) {
 		clickhouseDebug = false
 	}
 
+	// Alert configuration
+	alertsEnabled, err := strconv.ParseBool(getEnv("ALERTS_ENABLED", "false"))
+	if err != nil {
+		alertsEnabled = false
+	}
+
+	emailEnabled, err := strconv.ParseBool(getEnv("EMAIL_ALERTS_ENABLED", "false"))
+	if err != nil {
+		emailEnabled = false
+	}
+
+	webhookEnabled, err := strconv.ParseBool(getEnv("WEBHOOK_ALERTS_ENABLED", "false"))
+	if err != nil {
+		webhookEnabled = false
+	}
+
+	telegramEnabled, err := strconv.ParseBool(getEnv("TELEGRAM_ALERTS_ENABLED", "false"))
+	if err != nil {
+		telegramEnabled = false
+	}
+
+	webhookTimeout, err := strconv.Atoi(getEnv("WEBHOOK_TIMEOUT", "10"))
+	if err != nil {
+		webhookTimeout = 10
+	}
+
+	// Parse email recipients
+	emailTo := []string{}
+	if emailToStr := getEnv("EMAIL_TO", ""); emailToStr != "" {
+		emailTo = strings.Split(emailToStr, ",")
+		for i := range emailTo {
+			emailTo[i] = strings.TrimSpace(emailTo[i])
+		}
+	}
+
+	// Parse webhook headers
+	webhookHeaders := make(map[string]string)
+	if headersStr := getEnv("WEBHOOK_HEADERS", ""); headersStr != "" {
+		headerPairs := strings.Split(headersStr, ",")
+		for _, pair := range headerPairs {
+			if kv := strings.SplitN(pair, ":", 2); len(kv) == 2 {
+				webhookHeaders[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+			}
+		}
+	}
+
 	return &Config{
 		DatabaseURL:    getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/site_monitor?sslmode=disable"),
 		ServerAddress:  ":" + port,
@@ -86,6 +164,29 @@ func LoadConfig() (*Config, error) {
 			Enabled:       metricsEnabled,
 			BatchSize:     metricsBatchSize,
 			FlushInterval: time.Duration(metricsFlushInterval) * time.Second,
+		},
+		Alerts: AlertsConfig{
+			Enabled: alertsEnabled,
+			Email: EmailAlertConfig{
+				Enabled:    emailEnabled,
+				SMTPServer: getEnv("SMTP_SERVER", ""),
+				Port:       getEnv("SMTP_PORT", "587"),
+				Username:   getEnv("SMTP_USERNAME", ""),
+				Password:   getEnv("SMTP_PASSWORD", ""),
+				From:       getEnv("EMAIL_FROM", ""),
+				To:         emailTo,
+			},
+			Webhook: WebhookAlertConfig{
+				Enabled: webhookEnabled,
+				URL:     getEnv("WEBHOOK_URL", ""),
+				Headers: webhookHeaders,
+				Timeout: webhookTimeout,
+			},
+			Telegram: TelegramAlertConfig{
+				Enabled:  telegramEnabled,
+				BotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+				ChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
+			},
 		},
 	}, nil
 }

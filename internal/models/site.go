@@ -143,3 +143,41 @@ type SiteHistory struct {
 	Error        string    `json:"error"`
 	CheckedAt    time.Time `json:"checked_at"`
 }
+
+type AlertConfig struct {
+	ID                         int               `json:"id"`
+	Name                       string            `json:"name"`
+	Enabled                    bool              `json:"enabled"`
+	EmailEnabled               bool              `json:"email_enabled"`
+	WebhookEnabled             bool              `json:"webhook_enabled"`
+	TelegramEnabled            bool              `json:"telegram_enabled"`
+
+	// Email settings
+	SMTPServer                 string            `json:"smtp_server"`
+	SMTPPort                   string            `json:"smtp_port"`
+	SMTPUsername               string            `json:"smtp_username"`
+	SMTPPassword               string            `json:"smtp_password"`
+	EmailFrom                  string            `json:"email_from"`
+	EmailTo                    string            `json:"email_to"`
+
+	// Webhook settings
+	WebhookURL                 string            `json:"webhook_url"`
+	WebhookHeaders            map[string]string `json:"webhook_headers"`
+	WebhookTimeout            int               `json:"webhook_timeout"`
+
+	// Telegram settings
+	TelegramBotToken          string            `json:"telegram_bot_token"`
+	TelegramChatID            string            `json:"telegram_chat_id"`
+
+	// Alert conditions
+	AlertOnDown               bool              `json:"alert_on_down"`
+	AlertOnUp                 bool              `json:"alert_on_up"`
+	AlertOnSSLExpiry          bool              `json:"alert_on_ssl_expiry"`
+	SSLExpiryDays             int               `json:"ssl_expiry_days"`
+	AlertOnStatusCodeChange   bool              `json:"alert_on_status_code_change"`
+	AlertOnResponseTimeThreshold bool           `json:"alert_on_response_time_threshold"`
+	ResponseTimeThreshold     int               `json:"response_time_threshold"`
+
+	CreatedAt                 time.Time         `json:"created_at"`
+	UpdatedAt                 time.Time         `json:"updated_at"`
+}

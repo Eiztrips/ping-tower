@@ -37,10 +37,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"site-monitor/internal/config"
 	"site-monitor/internal/database"
 	"site-monitor/internal/models"
 	"site-monitor/internal/monitor"
+	"site-monitor/internal/notifications"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -99,6 +102,7 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
 	r.HandleFunc("/demo", DemoHandler()).Methods("GET")
 	r.HandleFunc("/metrics", MetricsWebHandler()).Methods("GET")
+	r.HandleFunc("/alerts", AlertsWebHandler()).Methods("GET")
 
 	// Swagger documentation
 	r.HandleFunc("/swagger", SwaggerUIHandler()).Methods("GET")
@@ -124,9 +128,17 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	// Real SSL alerts endpoint using database
 	r.HandleFunc("/api/ssl/alerts", HandleGetSSLAlertsFromDB(db)).Methods("GET")
 
+	// Alert configuration endpoints
+	r.HandleFunc("/api/alerts/configs", GetAlertConfigsHandler(db)).Methods("GET")
+	r.HandleFunc("/api/alerts/configs/{name}", GetAlertConfigHandler(db)).Methods("GET")
+	r.HandleFunc("/api/alerts/configs/{name}", UpdateAlertConfigHandler(db)).Methods("PUT")
+	r.HandleFunc("/api/alerts/configs", CreateAlertConfigHandler(db)).Methods("POST")
+	r.HandleFunc("/api/alerts/configs/{name}", DeleteAlertConfigHandler(db)).Methods("DELETE")
+	r.HandleFunc("/api/alerts/test", TestAlertHandler(db)).Methods("POST")
+
 	// Metrics API endpoints - real data from database
 	r.HandleFunc("/api/metrics/sites/{id}/hourly", HandleGetHourlyMetricsFromDB(db)).Methods("GET")
-	r.HandleFunc("/api/metrics/sites/{id}/performance", HandleGetPerformanceSummaryFromDB(db)).Methods("GET") 
+	r.HandleFunc("/api/metrics/sites/{id}/performance", HandleGetPerformanceSummaryFromDB(db)).Methods("GET")
 	r.HandleFunc("/api/metrics/aggregated", HandleGetAggregatedMetricsFromDB(db)).Methods("GET")
 	r.HandleFunc("/api/metrics/health", HandleGetSystemHealthFromDB(db)).Methods("GET")
 	r.HandleFunc("/api/metrics/stats", HandleGetMetricsStatsFromDB(db)).Methods("GET")
@@ -1287,4 +1299,285 @@ type HourlyMetrics struct {
 	AvgConnectTime    float64   `json:"avg_connect_time"`
 	AvgTLSTime        float64   `json:"avg_tls_time"`
 	AvgTTFB           float64   `json:"avg_ttfb"`
+}
+
+// Alert configuration handlers
+
+// GetAlertConfigsHandler - получить все конфигурации алертов
+// @Summary Получить все конфигурации алертов
+// @Description Возвращает список всех конфигураций алертов в системе
+// @Tags alerts
+// @Accept json
+// @Produce json
+// @Success 200 {array} models.AlertConfig "Список конфигураций алертов"
+// @Failure 500 {object} ErrorResponse "Ошибка сервера"
+// @Router /alerts/configs [get]
+func GetAlertConfigsHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		configs, err := db.GetAllAlertConfigs()
+		if err != nil {
+			log.Printf("❌ Ошибка получения конфигураций алертов: %v", err)
+			http.Error(w, `{"error": "Failed to fetch alert configs"}`, http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(configs)
+	}
+}
+
+// GetAlertConfigHandler - получить конфигурацию алертов по имени
+// @Summary Получить конфигурацию алертов
+// @Description Возвращает конфигурацию алертов по имени
+// @Tags alerts
+// @Accept json
+// @Produce json
+// @Param name path string true "Имя конфигурации"
+// @Success 200 {object} models.AlertConfig "Конфигурация алертов"
+// @Failure 404 {object} ErrorResponse "Конфигурация не найдена"
+// @Router /alerts/configs/{name} [get]
+func GetAlertConfigHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		name := vars["name"]
+
+		config, err := db.GetAlertConfig(name)
+		if err != nil {
+			log.Printf("❌ Ошибка получения конфигурации алертов %s: %v", name, err)
+			http.Error(w, `{"error": "Alert config not found"}`, http.StatusNotFound)
+			return
+		}
+
+		json.NewEncoder(w).Encode(config)
+	}
+}
+
+// CreateAlertConfigHandler - создать новую конфигурацию алертов
+// @Summary Создать конфигурацию алертов
+// @Description Создает новую конфигурацию алертов
+// @Tags alerts
+// @Accept json
+// @Produce json
+// @Param config body models.AlertConfig true "Данные конфигурации"
+// @Success 201 {object} models.AlertConfig "Конфигурация создана"
+// @Failure 400 {object} ErrorResponse "Неверные данные"
+// @Failure 409 {object} ErrorResponse "Конфигурация уже существует"
+// @Router /alerts/configs [post]
+func CreateAlertConfigHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		var config models.AlertConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+
+		if config.Name == "" {
+			http.Error(w, `{"error": "Name is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Initialize webhook headers if nil
+		if config.WebhookHeaders == nil {
+			config.WebhookHeaders = make(map[string]string)
+		}
+
+		err := db.CreateAlertConfig(&config)
+		if err != nil {
+			log.Printf("❌ Ошибка создания конфигурации алертов: %v", err)
+			http.Error(w, `{"error": "Failed to create alert config"}`, http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Создана конфигурация алертов: %s", config.Name)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(config)
+	}
+}
+
+// UpdateAlertConfigHandler - обновить конфигурацию алертов
+// @Summary Обновить конфигурацию алертов
+// @Description Обновляет существующую конфигурацию алертов
+// @Tags alerts
+// @Accept json
+// @Produce json
+// @Param name path string true "Имя конфигурации"
+// @Param config body models.AlertConfig true "Обновленные данные"
+// @Success 200 {object} models.AlertConfig "Конфигурация обновлена"
+// @Failure 400 {object} ErrorResponse "Неверные данные"
+// @Failure 404 {object} ErrorResponse "Конфигурация не найдена"
+// @Router /alerts/configs/{name} [put]
+func UpdateAlertConfigHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		name := vars["name"]
+
+		var config models.AlertConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+
+		config.Name = name
+
+		// Initialize webhook headers if nil
+		if config.WebhookHeaders == nil {
+			config.WebhookHeaders = make(map[string]string)
+		}
+
+		err := db.UpdateAlertConfig(&config)
+		if err != nil {
+			log.Printf("❌ Ошибка обновления конфигурации алертов %s: %v", name, err)
+			http.Error(w, `{"error": "Failed to update alert config"}`, http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Обновлена конфигурация алертов: %s", name)
+		json.NewEncoder(w).Encode(config)
+	}
+}
+
+// DeleteAlertConfigHandler - удалить конфигурацию алертов
+// @Summary Удалить конфигурацию алертов
+// @Description Удаляет конфигурацию алертов по имени
+// @Tags alerts
+// @Accept json
+// @Produce json
+// @Param name path string true "Имя конфигурации"
+// @Success 200 {object} SuccessResponse "Конфигурация удалена"
+// @Failure 404 {object} ErrorResponse "Конфигурация не найдена"
+// @Router /alerts/configs/{name} [delete]
+func DeleteAlertConfigHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		name := vars["name"]
+
+		// Prevent deletion of global config
+		if name == "global" {
+			http.Error(w, `{"error": "Cannot delete global configuration"}`, http.StatusBadRequest)
+			return
+		}
+
+		err := db.DeleteAlertConfig(name)
+		if err != nil {
+			log.Printf("❌ Ошибка удаления конфигурации алертов %s: %v", name, err)
+			http.Error(w, `{"error": "Failed to delete alert config"}`, http.StatusNotFound)
+			return
+		}
+
+		log.Printf("✅ Удалена конфигурация алертов: %s", name)
+		json.NewEncoder(w).Encode(SuccessResponse{Message: "Alert configuration deleted successfully"})
+	}
+}
+
+// TestAlertHandler - тестовая отправка алерта
+// @Summary Тестовая отправка алерта
+// @Description Отправляет тестовый алерт для проверки конфигурации
+// @Tags alerts
+// @Accept json
+// @Produce json
+// @Param test body TestAlertRequest true "Параметры тестового алерта"
+// @Success 200 {object} SuccessResponse "Тестовый алерт отправлен"
+// @Failure 400 {object} ErrorResponse "Неверные данные"
+// @Router /alerts/test [post]
+func TestAlertHandler(db *database.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		var request struct {
+			ConfigName string `json:"config_name"`
+			TestURL    string `json:"test_url"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+
+		if request.ConfigName == "" {
+			http.Error(w, `{"error": "Config name is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Get alert config
+		alertConfig, err := db.GetAlertConfig(request.ConfigName)
+		if err != nil {
+			http.Error(w, `{"error": "Alert config not found"}`, http.StatusNotFound)
+			return
+		}
+
+		// Convert AlertConfig to notifications config format
+		alertsConfig := convertToNotificationsConfig(alertConfig)
+
+		// Create test alert manager
+		alertManager := notifications.NewAlertManager(alertsConfig)
+
+		testURL := request.TestURL
+		if testURL == "" {
+			testURL = "https://example.com"
+		}
+
+		// Create test result
+		testResult := monitor.CheckResult{
+			Status:       "down",
+			StatusCode:   200,
+			ResponseTime: 150,
+			Error:        "Test alert message",
+		}
+
+		// Send test alert
+		err = alertManager.SendAlert(0, testURL, testResult, "test")
+		if err != nil {
+			log.Printf("❌ Ошибка отправки тестового алерта: %v", err)
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to send test alert: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Тестовый алерт отправлен для конфигурации: %s", request.ConfigName)
+		json.NewEncoder(w).Encode(SuccessResponse{Message: "Test alert sent successfully"})
+	}
+}
+
+// convertToNotificationsConfig converts database AlertConfig to notifications AlertsConfig
+func convertToNotificationsConfig(dbConfig *models.AlertConfig) *config.AlertsConfig {
+	// Parse email recipients
+	var emailTo []string
+	if dbConfig.EmailTo != "" {
+		emailTo = strings.Split(dbConfig.EmailTo, ",")
+		for i := range emailTo {
+			emailTo[i] = strings.TrimSpace(emailTo[i])
+		}
+	}
+
+	return &config.AlertsConfig{
+		Enabled: dbConfig.Enabled,
+		Email: config.EmailAlertConfig{
+			Enabled:    dbConfig.EmailEnabled,
+			SMTPServer: dbConfig.SMTPServer,
+			Port:       dbConfig.SMTPPort,
+			Username:   dbConfig.SMTPUsername,
+			Password:   dbConfig.SMTPPassword,
+			From:       dbConfig.EmailFrom,
+			To:         emailTo,
+		},
+		Webhook: config.WebhookAlertConfig{
+			Enabled: dbConfig.WebhookEnabled,
+			URL:     dbConfig.WebhookURL,
+			Headers: dbConfig.WebhookHeaders,
+			Timeout: dbConfig.WebhookTimeout,
+		},
+		Telegram: config.TelegramAlertConfig{
+			Enabled:  dbConfig.TelegramEnabled,
+			BotToken: dbConfig.TelegramBotToken,
+			ChatID:   dbConfig.TelegramChatID,
+		},
+	}
 }

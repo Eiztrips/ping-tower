@@ -58,7 +58,7 @@ services:
       - METRICS_ENABLED=true
       - METRICS_BATCH_SIZE=10
       - METRICS_FLUSH_INTERVAL=1
-      - CLICKHOUSE_DEBUG=true
+      - CLICKHOUSE_DEBUG=false
       - CHECK_INTERVAL=300
     depends_on:
       - db

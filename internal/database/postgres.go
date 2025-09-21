@@ -26,10 +26,6 @@ func NewDB(dataSourceName string) (*DB, error) {
 
 	dbInstance := &DB{db}
 
-	if err := dbInstance.runMigrations(); err != nil {
-		return nil, fmt.Errorf("ошибка выполнения миграций: %w", err)
-	}
-
 	log.Println("Успешное подключение к базе данных")
 	return dbInstance, nil
 }
@@ -309,421 +305,6 @@ func (db *DB) DeleteSite(url string) error {
     return nil
 }
 
-func (db *DB) applyMigration1() error {
-    query := `
-    -- Create basic sites table
-    CREATE TABLE IF NOT EXISTS sites (
-        id SERIAL PRIMARY KEY,
-        url VARCHAR(255) NOT NULL UNIQUE,
-        status VARCHAR(20) NOT NULL DEFAULT 'unknown',
-        last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    -- Insert sample data
-    INSERT INTO sites (url) VALUES 
-        ('https://google.com'),
-        ('https://github.com') 
-    ON CONFLICT (url) DO NOTHING;
-    `
-    
-    _, err := db.Exec(query)
-    if err != nil {
-        return fmt.Errorf("ошибка выполнения миграции 1: %w", err)
-    }
-    
-    log.Println("Миграция 1 выполнена: базовая таблица sites создана")
-    return nil
-}
-
-func (db *DB) applyMigration2() error {
-    query := `
-    -- Add new columns for enhanced monitoring
-    DO $$ 
-    BEGIN
-        -- Add status_code column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'status_code') THEN
-            ALTER TABLE sites ADD COLUMN status_code INTEGER DEFAULT 0;
-        END IF;
-        
-        -- Add response_time column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'response_time') THEN
-            ALTER TABLE sites ADD COLUMN response_time BIGINT DEFAULT 0;
-        END IF;
-        
-        -- Add content_length column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'content_length') THEN
-            ALTER TABLE sites ADD COLUMN content_length BIGINT DEFAULT 0;
-        END IF;
-        
-        -- Add ssl_valid column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_valid') THEN
-            ALTER TABLE sites ADD COLUMN ssl_valid BOOLEAN DEFAULT FALSE;
-        END IF;
-        
-        -- Add ssl_expiry column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_expiry') THEN
-            ALTER TABLE sites ADD COLUMN ssl_expiry TIMESTAMP NULL;
-        END IF;
-        
-        -- Add last_error column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'last_error') THEN
-            ALTER TABLE sites ADD COLUMN last_error TEXT DEFAULT '';
-        END IF;
-        
-        -- Add total_checks column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'total_checks') THEN
-            ALTER TABLE sites ADD COLUMN total_checks INTEGER DEFAULT 0;
-        END IF;
-        
-        -- Add successful_checks column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'successful_checks') THEN
-            ALTER TABLE sites ADD COLUMN successful_checks INTEGER DEFAULT 0;
-        END IF;
-    END $$;
-
-    -- Create history table for tracking all checks
-    CREATE TABLE IF NOT EXISTS site_history (
-        id SERIAL PRIMARY KEY,
-        site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
-        status VARCHAR(20) NOT NULL,
-        status_code INTEGER DEFAULT 0,
-        response_time BIGINT DEFAULT 0,
-        error TEXT DEFAULT '',
-        checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    -- Create additional indexes for better performance
-    CREATE INDEX IF NOT EXISTS idx_sites_status ON sites(status);
-    CREATE INDEX IF NOT EXISTS idx_history_site_id ON site_history(site_id);
-    CREATE INDEX IF NOT EXISTS idx_history_checked_at ON site_history(checked_at);
-    `
-
-    _, err := db.Exec(query)
-    if err != nil {
-        return fmt.Errorf("ошибка выполнения миграции 2: %w", err)
-    }
-    
-    log.Println("Миграция 2 выполнена: добавлены поля для расширенного мониторинга")
-    return nil
-}
-
-func (db *DB) applyMigration3() error {
-    query := `
-    -- Add all the detailed monitoring columns that might be missing
-    DO $$ 
-    BEGIN
-        -- Add dns_time column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'dns_time') THEN
-            ALTER TABLE sites ADD COLUMN dns_time BIGINT DEFAULT 0;
-        END IF;
-        
-        -- Add connect_time column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'connect_time') THEN
-            ALTER TABLE sites ADD COLUMN connect_time BIGINT DEFAULT 0;
-        END IF;
-        
-        -- Add tls_time column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'tls_time') THEN
-            ALTER TABLE sites ADD COLUMN tls_time BIGINT DEFAULT 0;
-        END IF;
-        
-        -- Add ttfb column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ttfb') THEN
-            ALTER TABLE sites ADD COLUMN ttfb BIGINT DEFAULT 0;
-        END IF;
-        
-        -- Add content_hash column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'content_hash') THEN
-            ALTER TABLE sites ADD COLUMN content_hash VARCHAR(255) DEFAULT '';
-        END IF;
-        
-        -- Add redirect_count column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'redirect_count') THEN
-            ALTER TABLE sites ADD COLUMN redirect_count INTEGER DEFAULT 0;
-        END IF;
-        
-        -- Add final_url column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'final_url') THEN
-            ALTER TABLE sites ADD COLUMN final_url TEXT DEFAULT '';
-        END IF;
-        
-        -- Add ssl_key_length column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_key_length') THEN
-            ALTER TABLE sites ADD COLUMN ssl_key_length INTEGER DEFAULT 0;
-        END IF;
-        
-        -- Add ssl_algorithm column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_algorithm') THEN
-            ALTER TABLE sites ADD COLUMN ssl_algorithm VARCHAR(50) DEFAULT '';
-        END IF;
-        
-        -- Add ssl_issuer column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'ssl_issuer') THEN
-            ALTER TABLE sites ADD COLUMN ssl_issuer TEXT DEFAULT '';
-        END IF;
-        
-        -- Add server_type column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'server_type') THEN
-            ALTER TABLE sites ADD COLUMN server_type VARCHAR(255) DEFAULT '';
-        END IF;
-        
-        -- Add powered_by column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'powered_by') THEN
-            ALTER TABLE sites ADD COLUMN powered_by VARCHAR(255) DEFAULT '';
-        END IF;
-        
-        -- Add content_type column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'content_type') THEN
-            ALTER TABLE sites ADD COLUMN content_type VARCHAR(255) DEFAULT '';
-        END IF;
-        
-        -- Add cache_control column
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sites' AND column_name = 'cache_control') THEN
-            ALTER TABLE sites ADD COLUMN cache_control VARCHAR(255) DEFAULT '';
-        END IF;
-    END $$;
-    `
-
-    _, err := db.Exec(query)
-    if err != nil {
-        return fmt.Errorf("ошибка выполнения миграции 3: %w", err)
-    }
-    
-    log.Println("Миграция 3 выполнена: добавлены поля для детального мониторинга")
-    return nil
-}
-
-func (db *DB) applyMigration4() error {
-	query := `
-	-- Add site configuration table
-	CREATE TABLE IF NOT EXISTS site_configs (
-		site_id INTEGER PRIMARY KEY REFERENCES sites(id) ON DELETE CASCADE,
-		check_interval INTEGER DEFAULT 30,
-		timeout INTEGER DEFAULT 30,
-		expected_status INTEGER DEFAULT 200,
-		follow_redirects BOOLEAN DEFAULT TRUE,
-		max_redirects INTEGER DEFAULT 10,
-		check_ssl BOOLEAN DEFAULT TRUE,
-		ssl_alert_days INTEGER DEFAULT 30,
-		check_keywords TEXT DEFAULT '',
-		avoid_keywords TEXT DEFAULT '',
-		headers JSONB DEFAULT '{}',
-		user_agent VARCHAR(500) DEFAULT 'Site-Monitor/1.0',
-		enabled BOOLEAN DEFAULT TRUE,
-		notify_on_down BOOLEAN DEFAULT TRUE,
-		notify_on_up BOOLEAN DEFAULT TRUE,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	-- Insert default configs for existing sites
-	INSERT INTO site_configs (site_id) 
-	SELECT id FROM sites 
-	ON CONFLICT (site_id) DO NOTHING;
-
-	-- Create trigger function (replace if exists)
-	CREATE OR REPLACE FUNCTION create_site_config()
-	RETURNS TRIGGER AS $$
-	BEGIN
-		INSERT INTO site_configs (site_id) VALUES (NEW.id);
-		RETURN NEW;
-	END;
-	$$ LANGUAGE plpgsql;
-
-	-- Drop trigger if exists and create new one
-	DROP TRIGGER IF EXISTS trigger_create_site_config ON sites;
-	CREATE TRIGGER trigger_create_site_config
-		AFTER INSERT ON sites
-		FOR EACH ROW
-		EXECUTE FUNCTION create_site_config();
-	`
-
-	_, err := db.Exec(query)
-	if err != nil {
-		return fmt.Errorf("ошибка выполнения миграции 4: %w", err)
-	}
-	
-	log.Println("Миграция 4 выполнена: добавлена таблица конфигурации сайтов")
-	return nil
-}
-
-func (db *DB) applyMigration5() error {
-	query := `
-	-- Add advanced configuration columns for metric collection and display control
-	DO $$ 
-	BEGIN
-		-- Metric collection flags - ОТКЛЮЧАЕМ большинство метрик по умолчанию для экономии места
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_dns_time') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_dns_time BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_connect_time') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_connect_time BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_tls_time') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_tls_time BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_ttfb') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_ttfb BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_content_hash') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_content_hash BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_redirects') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_redirects BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_ssl_details') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_ssl_details BOOLEAN DEFAULT TRUE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_server_info') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_server_info BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_headers') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_headers BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		-- Display control flags - показываем только основное
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_response_time') THEN
-			ALTER TABLE site_configs ADD COLUMN show_response_time BOOLEAN DEFAULT TRUE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_content_length') THEN
-			ALTER TABLE site_configs ADD COLUMN show_content_length BOOLEAN DEFAULT TRUE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_uptime') THEN
-			ALTER TABLE site_configs ADD COLUMN show_uptime BOOLEAN DEFAULT TRUE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_ssl_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_ssl_info BOOLEAN DEFAULT TRUE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_server_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_server_info BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_performance') THEN
-			ALTER TABLE site_configs ADD COLUMN show_performance BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_redirect_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_redirect_info BOOLEAN DEFAULT FALSE;
-		END IF;
-		
-		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_content_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_content_info BOOLEAN DEFAULT FALSE;
-		END IF;
-	END $$;
-
-	-- Обновляем конфигурации на более консервативные настройки - интервал 15 минут, минимум метрик
-	UPDATE site_configs SET 
-		check_interval = 900, -- 15 минут вместо 5
-		collect_dns_time = FALSE,
-		collect_connect_time = FALSE,
-		collect_tls_time = FALSE,
-		collect_ttfb = FALSE,
-		collect_content_hash = FALSE,
-		collect_redirects = FALSE,
-		collect_ssl_details = TRUE,  -- Оставляем только SSL
-		collect_server_info = FALSE,
-		collect_headers = FALSE,
-		show_response_time = TRUE,
-		show_content_length = TRUE,
-		show_uptime = TRUE,
-		show_ssl_info = TRUE,
-		show_server_info = FALSE,
-		show_performance = FALSE,
-		show_redirect_info = FALSE,
-		show_content_info = FALSE,
-		updated_at = CURRENT_TIMESTAMP;
-	`
-
-	_, err := db.Exec(query)
-	if err != nil {
-		return fmt.Errorf("ошибка выполнения миграции 5: %w", err)
-	}
-	
-	log.Println("Миграция 5 выполнена: настроены консервативные параметры для экономии места")
-	return nil
-}
-
-func (db *DB) runMigrations() error {
-    log.Println("🔄 Выполнение миграций базы данных...")
-    
-    _, err := db.Exec(`
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `)
-    if err != nil {
-        return fmt.Errorf("ошибка создания таблицы миграций: %w", err)
-    }
-
-    if !db.isMigrationApplied(1) {
-        err = db.applyMigration1()
-        if err != nil {
-            return fmt.Errorf("ошибка применения миграции 1: %w", err)
-        }
-        db.markMigrationApplied(1)
-    }
-
-    if !db.isMigrationApplied(2) {
-        err = db.applyMigration2()
-        if err != nil {
-            return fmt.Errorf("ошибка применения миграции 2: %w", err)
-        }
-        db.markMigrationApplied(2)
-    }
-
-    if !db.isMigrationApplied(3) {
-        err = db.applyMigration3()
-        if err != nil {
-            return fmt.Errorf("ошибка применения миграции 3: %w", err)
-        }
-        db.markMigrationApplied(3)
-    }
-
-    if !db.isMigrationApplied(4) {
-        err = db.applyMigration4()
-        if err != nil {
-            return fmt.Errorf("ошибка применения миграции 4: %w", err)
-        }
-        db.markMigrationApplied(4)
-    }
-
-    if !db.isMigrationApplied(5) {
-        err = db.applyMigration5()
-        if err != nil {
-            return fmt.Errorf("ошибка применения миграции 5: %w", err)
-        }
-        db.markMigrationApplied(5)
-    }
-
-    log.Println("✅ Миграции выполнены успешно")
-    return nil
-}
-
-func (db *DB) isMigrationApplied(version int) bool {
-    var count int
-    err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = $1", version).Scan(&count)
-    return err == nil && count > 0
-}
-
-func (db *DB) markMigrationApplied(version int) {
-    db.Exec("INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING", version)
-}
-
 func (db *DB) UpdateSiteStatus(id int, status string) error {
     query := `UPDATE sites SET 
                 status = $1::varchar, 
@@ -742,4 +323,160 @@ func (db *DB) TriggerCheck() error {
     log.Println("🔄 Принудительный запуск проверки всех сайтов")
     _, err := db.Exec("UPDATE sites SET last_checked = last_checked - INTERVAL '1 hour'")
     return err
+}
+
+// Alert configuration functions
+func (db *DB) GetAlertConfig(name string) (*models.AlertConfig, error) {
+	var config models.AlertConfig
+	var webhookHeadersJSON []byte
+
+	query := `SELECT id, name, enabled, email_enabled, webhook_enabled, telegram_enabled,
+			  smtp_server, smtp_port, smtp_username, smtp_password, email_from, email_to,
+			  webhook_url, COALESCE(webhook_headers, '{}'), webhook_timeout,
+			  telegram_bot_token, telegram_chat_id,
+			  alert_on_down, alert_on_up, alert_on_ssl_expiry, ssl_expiry_days,
+			  alert_on_status_code_change, alert_on_response_time_threshold, response_time_threshold,
+			  created_at, updated_at FROM alert_configs WHERE name = $1`
+
+	err := db.QueryRow(query, name).Scan(
+		&config.ID, &config.Name, &config.Enabled, &config.EmailEnabled, &config.WebhookEnabled, &config.TelegramEnabled,
+		&config.SMTPServer, &config.SMTPPort, &config.SMTPUsername, &config.SMTPPassword, &config.EmailFrom, &config.EmailTo,
+		&config.WebhookURL, &webhookHeadersJSON, &config.WebhookTimeout,
+		&config.TelegramBotToken, &config.TelegramChatID,
+		&config.AlertOnDown, &config.AlertOnUp, &config.AlertOnSSLExpiry, &config.SSLExpiryDays,
+		&config.AlertOnStatusCodeChange, &config.AlertOnResponseTimeThreshold, &config.ResponseTimeThreshold,
+		&config.CreatedAt, &config.UpdatedAt)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("конфигурация алертов не найдена")
+		}
+		return nil, err
+	}
+
+	config.WebhookHeaders = make(map[string]string)
+	if len(webhookHeadersJSON) > 0 {
+		json.Unmarshal(webhookHeadersJSON, &config.WebhookHeaders)
+	}
+
+	return &config, nil
+}
+
+func (db *DB) UpdateAlertConfig(config *models.AlertConfig) error {
+	webhookHeadersJSON, _ := json.Marshal(config.WebhookHeaders)
+
+	query := `UPDATE alert_configs SET
+			  enabled = $2, email_enabled = $3, webhook_enabled = $4, telegram_enabled = $5,
+			  smtp_server = $6, smtp_port = $7, smtp_username = $8, smtp_password = $9,
+			  email_from = $10, email_to = $11,
+			  webhook_url = $12, webhook_headers = $13, webhook_timeout = $14,
+			  telegram_bot_token = $15, telegram_chat_id = $16,
+			  alert_on_down = $17, alert_on_up = $18, alert_on_ssl_expiry = $19, ssl_expiry_days = $20,
+			  alert_on_status_code_change = $21, alert_on_response_time_threshold = $22,
+			  response_time_threshold = $23, updated_at = CURRENT_TIMESTAMP
+			  WHERE name = $1`
+
+	_, err := db.Exec(query, config.Name, config.Enabled, config.EmailEnabled, config.WebhookEnabled, config.TelegramEnabled,
+		config.SMTPServer, config.SMTPPort, config.SMTPUsername, config.SMTPPassword,
+		config.EmailFrom, config.EmailTo,
+		config.WebhookURL, webhookHeadersJSON, config.WebhookTimeout,
+		config.TelegramBotToken, config.TelegramChatID,
+		config.AlertOnDown, config.AlertOnUp, config.AlertOnSSLExpiry, config.SSLExpiryDays,
+		config.AlertOnStatusCodeChange, config.AlertOnResponseTimeThreshold, config.ResponseTimeThreshold)
+
+	return err
+}
+
+func (db *DB) GetAllAlertConfigs() ([]models.AlertConfig, error) {
+	query := `SELECT id, name, enabled, email_enabled, webhook_enabled, telegram_enabled,
+			  smtp_server, smtp_port, smtp_username, smtp_password, email_from, email_to,
+			  webhook_url, COALESCE(webhook_headers, '{}'), webhook_timeout,
+			  telegram_bot_token, telegram_chat_id,
+			  alert_on_down, alert_on_up, alert_on_ssl_expiry, ssl_expiry_days,
+			  alert_on_status_code_change, alert_on_response_time_threshold, response_time_threshold,
+			  created_at, updated_at FROM alert_configs ORDER BY created_at`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения конфигураций алертов: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.AlertConfig
+	for rows.Next() {
+		var config models.AlertConfig
+		var webhookHeadersJSON []byte
+
+		err := rows.Scan(
+			&config.ID, &config.Name, &config.Enabled, &config.EmailEnabled, &config.WebhookEnabled, &config.TelegramEnabled,
+			&config.SMTPServer, &config.SMTPPort, &config.SMTPUsername, &config.SMTPPassword, &config.EmailFrom, &config.EmailTo,
+			&config.WebhookURL, &webhookHeadersJSON, &config.WebhookTimeout,
+			&config.TelegramBotToken, &config.TelegramChatID,
+			&config.AlertOnDown, &config.AlertOnUp, &config.AlertOnSSLExpiry, &config.SSLExpiryDays,
+			&config.AlertOnStatusCodeChange, &config.AlertOnResponseTimeThreshold, &config.ResponseTimeThreshold,
+			&config.CreatedAt, &config.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка чтения данных конфигурации алертов: %w", err)
+		}
+
+		config.WebhookHeaders = make(map[string]string)
+		if len(webhookHeadersJSON) > 0 {
+			json.Unmarshal(webhookHeadersJSON, &config.WebhookHeaders)
+		}
+
+		configs = append(configs, config)
+	}
+
+	return configs, nil
+}
+
+func (db *DB) CreateAlertConfig(config *models.AlertConfig) error {
+	webhookHeadersJSON, _ := json.Marshal(config.WebhookHeaders)
+
+	query := `INSERT INTO alert_configs
+			  (name, enabled, email_enabled, webhook_enabled, telegram_enabled,
+			   smtp_server, smtp_port, smtp_username, smtp_password, email_from, email_to,
+			   webhook_url, webhook_headers, webhook_timeout,
+			   telegram_bot_token, telegram_chat_id,
+			   alert_on_down, alert_on_up, alert_on_ssl_expiry, ssl_expiry_days,
+			   alert_on_status_code_change, alert_on_response_time_threshold, response_time_threshold)
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+			  RETURNING id`
+
+	err := db.QueryRow(query, config.Name, config.Enabled, config.EmailEnabled, config.WebhookEnabled, config.TelegramEnabled,
+		config.SMTPServer, config.SMTPPort, config.SMTPUsername, config.SMTPPassword,
+		config.EmailFrom, config.EmailTo,
+		config.WebhookURL, webhookHeadersJSON, config.WebhookTimeout,
+		config.TelegramBotToken, config.TelegramChatID,
+		config.AlertOnDown, config.AlertOnUp, config.AlertOnSSLExpiry, config.SSLExpiryDays,
+		config.AlertOnStatusCodeChange, config.AlertOnResponseTimeThreshold, config.ResponseTimeThreshold).Scan(&config.ID)
+
+	return err
+}
+
+func (db *DB) DeleteAlertConfig(name string) error {
+	query := "DELETE FROM alert_configs WHERE name = $1"
+	result, err := db.Exec(query, name)
+	if err != nil {
+		return fmt.Errorf("ошибка удаления конфигурации алертов: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ошибка проверки результата удаления: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("конфигурация алертов не найдена")
+	}
+
+	return nil
+}
+
+func (db *DB) LogAlert(siteID int, alertConfigID int, alertType, channel, status, message, errorMessage string) error {
+	query := `INSERT INTO alert_history (site_id, alert_config_id, alert_type, channel, status, message, error_message)
+			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+	_, err := db.Exec(query, siteID, alertConfigID, alertType, channel, status, message, errorMessage)
+	return err
 }

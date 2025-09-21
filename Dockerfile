@@ -8,7 +8,7 @@ RUN go mod download
 COPY . .
 
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -o site-monitor ./cmd/main.go
+RUN go build -ldflags="-s -w" -o site-monitor ./cmd/main.go
 
 FROM alpine:latest
 
