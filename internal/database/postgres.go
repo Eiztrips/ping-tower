@@ -554,29 +554,29 @@ func (db *DB) applyMigration5() error {
 	-- Add advanced configuration columns for metric collection and display control
 	DO $$ 
 	BEGIN
-		-- Metric collection flags - собираем ВСЕ метрики по умолчанию
+		-- Metric collection flags - ОТКЛЮЧАЕМ большинство метрик по умолчанию для экономии места
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_dns_time') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_dns_time BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_dns_time BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_connect_time') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_connect_time BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_connect_time BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_tls_time') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_tls_time BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_tls_time BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_ttfb') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_ttfb BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_ttfb BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_content_hash') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_content_hash BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_content_hash BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_redirects') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_redirects BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_redirects BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_ssl_details') THEN
@@ -584,14 +584,14 @@ func (db *DB) applyMigration5() error {
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_server_info') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_server_info BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_server_info BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'collect_headers') THEN
-			ALTER TABLE site_configs ADD COLUMN collect_headers BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN collect_headers BOOLEAN DEFAULT FALSE;
 		END IF;
 		
-		-- Display control flags - показываем ВСЕ метрики по умолчанию  
+		-- Display control flags - показываем только основное
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_response_time') THEN
 			ALTER TABLE site_configs ADD COLUMN show_response_time BOOLEAN DEFAULT TRUE;
 		END IF;
@@ -609,42 +609,42 @@ func (db *DB) applyMigration5() error {
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_server_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_server_info BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN show_server_info BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_performance') THEN
-			ALTER TABLE site_configs ADD COLUMN show_performance BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN show_performance BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_redirect_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_redirect_info BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN show_redirect_info BOOLEAN DEFAULT FALSE;
 		END IF;
 		
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'site_configs' AND column_name = 'show_content_info') THEN
-			ALTER TABLE site_configs ADD COLUMN show_content_info BOOLEAN DEFAULT TRUE;
+			ALTER TABLE site_configs ADD COLUMN show_content_info BOOLEAN DEFAULT FALSE;
 		END IF;
 	END $$;
 
-	-- Set default values for existing configs - собираем и показываем ВСЕ метрики, интервал 5 минут
+	-- Обновляем конфигурации на более консервативные настройки - интервал 15 минут, минимум метрик
 	UPDATE site_configs SET 
-		check_interval = 300, -- 5 минут
-		collect_dns_time = TRUE,
-		collect_connect_time = TRUE,
-		collect_tls_time = TRUE,
-		collect_ttfb = TRUE,
-		collect_content_hash = TRUE,
-		collect_redirects = TRUE,
-		collect_ssl_details = TRUE,
-		collect_server_info = TRUE,
-		collect_headers = TRUE,
+		check_interval = 900, -- 15 минут вместо 5
+		collect_dns_time = FALSE,
+		collect_connect_time = FALSE,
+		collect_tls_time = FALSE,
+		collect_ttfb = FALSE,
+		collect_content_hash = FALSE,
+		collect_redirects = FALSE,
+		collect_ssl_details = TRUE,  -- Оставляем только SSL
+		collect_server_info = FALSE,
+		collect_headers = FALSE,
 		show_response_time = TRUE,
 		show_content_length = TRUE,
 		show_uptime = TRUE,
 		show_ssl_info = TRUE,
-		show_server_info = TRUE,
-		show_performance = TRUE,
-		show_redirect_info = TRUE,
-		show_content_info = TRUE,
+		show_server_info = FALSE,
+		show_performance = FALSE,
+		show_redirect_info = FALSE,
+		show_content_info = FALSE,
 		updated_at = CURRENT_TIMESTAMP;
 	`
 
@@ -653,7 +653,7 @@ func (db *DB) applyMigration5() error {
 		return fmt.Errorf("ошибка выполнения миграции 5: %w", err)
 	}
 	
-	log.Println("Миграция 5 выполнена: добавлена расширенная конфигурация метрик с базовыми настройками по умолчанию")
+	log.Println("Миграция 5 выполнена: настроены консервативные параметры для экономии места")
 	return nil
 }
 

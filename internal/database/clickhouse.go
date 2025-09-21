@@ -80,7 +80,7 @@ func (ch *ClickHouseDB) initializeSchema() error {
 			status String,
 			status_code UInt16,
 			response_time_ms UInt64,
-			content_length UInt64,
+			content_length UInt64 DEFAULT 0,
 			dns_time_ms UInt64 DEFAULT 0,
 			connect_time_ms UInt64 DEFAULT 0,
 			tls_time_ms UInt64 DEFAULT 0,
@@ -103,57 +103,53 @@ func (ch *ClickHouseDB) initializeSchema() error {
 		) ENGINE = MergeTree()
 		PARTITION BY toYYYYMM(timestamp_date)
 		ORDER BY (site_id, timestamp)
-		TTL timestamp_date + INTERVAL 1 YEAR
+		TTL timestamp_date + INTERVAL 3 MONTH  -- Уменьшено с 1 года до 3 месяцев
 		SETTINGS index_granularity = 8192`,
 
+		// Оптимизированные materialized views с меньшим количеством данных
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS site_metrics_hourly
 		ENGINE = SummingMergeTree()
 		PARTITION BY toYYYYMM(hour)
 		ORDER BY (site_id, hour)
+		TTL hour + INTERVAL 1 MONTH  -- TTL для hourly данных
 		AS SELECT
 			toStartOfHour(timestamp_date) as hour,
 			site_id,
-			site_url,
+			any(site_url) as site_url,  -- Используем any() вместо site_url для экономии
 			count() as total_checks,
 			countIf(status = 'up') as successful_checks,
 			avg(response_time_ms) as avg_response_time,
 			quantile(0.95)(response_time_ms) as p95_response_time,
-			quantile(0.99)(response_time_ms) as p99_response_time,
 			min(response_time_ms) as min_response_time,
 			max(response_time_ms) as max_response_time,
-			avg(content_length) as avg_content_length,
-			avg(dns_time_ms) as avg_dns_time,
-			avg(connect_time_ms) as avg_connect_time,
-			avg(tls_time_ms) as avg_tls_time,
-			avg(ttfb_ms) as avg_ttfb,
-			countIf(ssl_valid = 1) as ssl_valid_count,
-			uniq(status_code) as unique_status_codes
+			avgIf(dns_time_ms, dns_time_ms > 0) as avg_dns_time,
+			avgIf(connect_time_ms, connect_time_ms > 0) as avg_connect_time,
+			avgIf(tls_time_ms, tls_time_ms > 0) as avg_tls_time,
+			avgIf(ttfb_ms, ttfb_ms > 0) as avg_ttfb,
+			countIf(ssl_valid = 1) as ssl_valid_count
 		FROM site_metrics
-		GROUP BY hour, site_id, site_url`,
+		WHERE timestamp_date >= subtractDays(now(), 7)  -- Только последние 7 дней для hourly
+		GROUP BY hour, site_id`,
 
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS site_metrics_daily
 		ENGINE = SummingMergeTree()
 		PARTITION BY toYYYYMM(day)
 		ORDER BY (site_id, day)
+		TTL day + INTERVAL 6 MONTH  -- TTL для daily данных
 		AS SELECT
 			toDate(timestamp_date) as day,
 			site_id,
-			site_url,
+			any(site_url) as site_url,
 			count() as total_checks,
 			countIf(status = 'up') as successful_checks,
 			(countIf(status = 'up') * 100.0 / count()) as uptime_percent,
 			avg(response_time_ms) as avg_response_time,
 			quantile(0.95)(response_time_ms) as p95_response_time,
-			quantile(0.99)(response_time_ms) as p99_response_time,
 			min(response_time_ms) as min_response_time,
-			max(response_time_ms) as max_response_time,
-			sum(content_length) as total_content_length,
-			avg(dns_time_ms) as avg_dns_time,
-			avg(connect_time_ms) as avg_connect_time,
-			avg(tls_time_ms) as avg_tls_time,
-			avg(ttfb_ms) as avg_ttfb
+			max(response_time_ms) as max_response_time
 		FROM site_metrics
-		GROUP BY day, site_id, site_url`,
+		WHERE timestamp_date >= subtractMonths(now(), 3)  -- Только последние 3 месяца
+		GROUP BY day, site_id`,
 
 		`CREATE TABLE IF NOT EXISTS downtime_events (
 			event_id UUID DEFAULT generateUUIDv4(),
@@ -170,6 +166,7 @@ func (ch *ClickHouseDB) initializeSchema() error {
 		) ENGINE = MergeTree()
 		PARTITION BY toYYYYMM(start_time_date)
 		ORDER BY (site_id, start_time)
+		TTL start_time_date + INTERVAL 6 MONTH  -- 6 месяцев для downtime events
 		SETTINGS index_granularity = 8192`,
 
 		`CREATE TABLE IF NOT EXISTS ssl_certificates (
@@ -185,6 +182,7 @@ func (ch *ClickHouseDB) initializeSchema() error {
 		) ENGINE = ReplacingMergeTree(last_checked)
 		PARTITION BY toYYYYMM(ssl_expiry)
 		ORDER BY (site_id, ssl_expiry)
+		TTL ssl_expiry + INTERVAL 1 MONTH  -- Убираем старые SSL записи через месяц после истечения
 		SETTINGS index_granularity = 8192`,
 	}
 
@@ -194,7 +192,7 @@ func (ch *ClickHouseDB) initializeSchema() error {
 		}
 	}
 
-	log.Println("✅ ClickHouse schema initialized successfully")
+	log.Println("✅ ClickHouse schema initialized with optimized TTL and storage settings")
 	return nil
 }
 
@@ -432,4 +430,26 @@ func (ch *ClickHouseDB) GetExpiringSSLCertificates(days int) ([]map[string]inter
 	}
 
 	return results, nil
+}
+
+// Добавляем метод для очистки старых данных
+func (ch *ClickHouseDB) CleanupOldData() error {
+	ctx := context.Background()
+	
+	queries := []string{
+		`OPTIMIZE TABLE site_metrics FINAL`,
+		`OPTIMIZE TABLE site_metrics_hourly FINAL`, 
+		`OPTIMIZE TABLE site_metrics_daily FINAL`,
+		`OPTIMIZE TABLE downtime_events FINAL`,
+		`OPTIMIZE TABLE ssl_certificates FINAL`,
+	}
+	
+	for _, query := range queries {
+		if err := ch.conn.Exec(ctx, query); err != nil {
+			log.Printf("⚠️ Failed to optimize table: %v", err)
+		}
+	}
+	
+	log.Println("✅ ClickHouse tables optimized")
+	return nil
 }
