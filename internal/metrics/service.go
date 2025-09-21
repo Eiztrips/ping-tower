@@ -3,8 +3,8 @@ package metrics
 import (
 	"fmt"
 	"log"
-	"site-monitor/internal/database"
-	"site-monitor/internal/monitor"
+	"ping-tower/internal/database"
+	"ping-tower/internal/monitor"
 	"sync"
 	"time"
 )

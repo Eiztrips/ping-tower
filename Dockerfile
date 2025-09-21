@@ -8,7 +8,7 @@ RUN go mod download
 COPY . .
 
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -ldflags="-s -w" -o site-monitor ./cmd/main.go
+RUN go build -ldflags="-s -w" -o ping-tower ./cmd/main.go
 
 FROM alpine:latest
 
@@ -16,9 +16,9 @@ WORKDIR /root/
 
 RUN apk --no-cache add ca-certificates libc6-compat
 
-COPY --from=builder /app/site-monitor .
+COPY --from=builder /app/ping-tower .
 COPY --from=builder /app/docs/ ./docs/
 
-RUN chmod +x ./site-monitor
+RUN chmod +x ./ping-tower
 
-CMD ["./site-monitor"]
+CMD ["./ping-tower"]

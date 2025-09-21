@@ -1,4 +1,4 @@
-module site-monitor
+module ping-tower
 
 go 1.24.0
 

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"site-monitor/internal/metrics"
+	"ping-tower/internal/metrics"
 	"strconv"
 
 	"github.com/gorilla/mux"
