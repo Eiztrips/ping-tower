@@ -17,6 +17,7 @@ WORKDIR /root/
 RUN apk --no-cache add ca-certificates libc6-compat
 
 COPY --from=builder /app/site-monitor .
+COPY --from=builder /app/docs/ ./docs/
 
 RUN chmod +x ./site-monitor
 

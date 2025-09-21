@@ -1,3 +1,35 @@
+// @title Site Monitor API
+// @version 1.0.0
+// @description Полнофункциональный API для мониторинга сайтов с детальной аналитикой, планировщиком заданий и SSL мониторингом
+// @termsOfService https://sitemonitor.com/terms/
+
+// @contact.name Site Monitor Support
+// @contact.email support@sitemonitor.com
+// @contact.url https://sitemonitor.com/support
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /api
+
+// @schemes http https
+
+// @tag.name sites
+// @tag.description Управление мониторингом сайтов
+
+// @tag.name dashboard  
+// @tag.description Статистика и дашборд
+
+// @tag.name metrics
+// @tag.description Детальные метрики и аналитика
+
+// @tag.name ssl
+// @tag.description SSL сертификаты и безопасность
+
+// @tag.name health
+// @tag.description Состояние системы
+
 package handlers
 
 import (
@@ -67,6 +99,12 @@ func RegisterRoutes(r *mux.Router, db *database.DB) {
 	r.HandleFunc("/", WebInterfaceHandler()).Methods("GET")
 	r.HandleFunc("/demo", DemoHandler()).Methods("GET")
 	r.HandleFunc("/metrics", MetricsWebHandler()).Methods("GET")
+
+	// Swagger documentation
+	r.HandleFunc("/swagger", SwaggerUIHandler()).Methods("GET")
+	r.HandleFunc("/api/swagger/swagger.yaml", SwaggerYAMLHandler()).Methods("GET")
+	r.HandleFunc("/api/swagger/swagger.json", SwaggerJSONHandler()).Methods("GET")
+	r.PathPrefix("/swagger-ui/").Handler(http.StripPrefix("/swagger-ui/", http.FileServer(http.Dir("./swagger-ui/"))))
 
 	// API routes for sites management
 	r.HandleFunc("/api/sites", AddSiteHandler(db)).Methods("POST")
@@ -510,6 +548,14 @@ func HandleGetMetricsStatsFromDB(db *database.DB) http.HandlerFunc {
 }
 
 // HandleGetAllSites - получить все сайты
+// @Summary Получить список всех сайтов
+// @Description Возвращает список всех сайтов с их статусами, конфигурациями и детальными метриками
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Success 200 {array} models.Site "Список сайтов получен успешно"
+// @Failure 500 {object} ErrorResponse "Ошибка сервера"
+// @Router /sites [get]
 func HandleGetAllSites(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -529,6 +575,16 @@ func HandleGetAllSites(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleAddSite - добавить новый сайт
+// @Summary Добавить новый сайт для мониторинга
+// @Description Добавляет новый сайт в систему мониторинга с базовой конфигурацией и запускает автоматическую проверку
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Param site body AddSiteRequest true "Данные сайта"
+// @Success 201 {object} SuccessResponse "Сайт успешно добавлен"
+// @Failure 400 {object} ErrorResponse "Неверный формат запроса"
+// @Failure 409 {object} ErrorResponse "Сайт уже существует"
+// @Router /sites [post]
 func HandleAddSite(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -565,6 +621,16 @@ func HandleAddSite(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleDeleteSite - удалить сайт
+// @Summary Удалить сайт из мониторинга
+// @Description Удаляет сайт и всю связанную с ним информацию из системы мониторинга
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Param site body DeleteSiteRequest true "URL сайта для удаления"
+// @Success 200 {object} SuccessResponse "Сайт успешно удален"
+// @Failure 400 {object} ErrorResponse "Неверный формат запроса"
+// @Failure 404 {object} ErrorResponse "Сайт не найден"
+// @Router /sites/delete [delete]
 func HandleDeleteSite(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -596,6 +662,16 @@ func HandleDeleteSite(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGetSiteConfig - получить конфигурацию сайта
+// @Summary Получить конфигурацию сайта
+// @Description Возвращает детальную конфигурацию мониторинга для конкретного сайта
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Param id path int true "ID сайта"
+// @Success 200 {object} models.SiteConfig "Конфигурация получена успешно"
+// @Failure 400 {object} ErrorResponse "Неверный ID сайта"
+// @Failure 404 {object} ErrorResponse "Конфигурация не найдена"
+// @Router /sites/{id}/config [get]
 func HandleGetSiteConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -641,6 +717,17 @@ func HandleGetSiteConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleUpdateSiteConfig - обновить конфигурацию сайта
+// @Summary Обновить конфигурацию сайта
+// @Description Обновляет настройки мониторинга: интервалы проверки, cron расписания, параметры сбора метрик
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Param id path int true "ID сайта"
+// @Param config body models.SiteConfig true "Новая конфигурация сайта"
+// @Success 200 {object} SuccessResponse "Конфигурация обновлена успешно"
+// @Failure 400 {object} ErrorResponse "Неверные данные конфигурации"
+// @Failure 500 {object} ErrorResponse "Ошибка обновления"
+// @Router /sites/{id}/config [put]
 func HandleUpdateSiteConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -727,6 +814,13 @@ func HandleDashboardStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleHealthCheck - проверка здоровья системы
+// @Summary Состояние системы
+// @Description Возвращает информацию о состоянии всех компонентов системы: PostgreSQL, ClickHouse, количество сайтов
+// @Tags health
+// @Accept json
+// @Produce json
+// @Success 200 {object} HealthResponse "Состояние системы получено успешно"
+// @Router /health [get]
 func HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -754,6 +848,13 @@ func HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // SSEHandler - обработчик Server-Sent Events
+// @Summary Подключение к реальному времени
+// @Description Подключается к потоку Server-Sent Events для получения обновлений в реальном времени
+// @Tags health
+// @Accept text/event-stream
+// @Produce text/event-stream
+// @Success 200 {string} string "text/event-stream"
+// @Router /sse [get]
 func SSEHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -817,6 +918,14 @@ func BroadcastSSE(msgType string, data interface{}) {
 }
 
 // TriggerCheckHandler - запуск проверки по требованию
+// @Summary Запустить проверку всех сайтов
+// @Description Инициирует немедленную проверку всех сайтов в системе мониторинга
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Success 200 {object} SuccessResponse "Проверка запущена успешно"
+// @Failure 500 {object} ErrorResponse "Ошибка запуска проверки"
+// @Router /check [post]
 func TriggerCheckHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("🔄 Принудительный запуск проверки всех сайтов")
@@ -1016,6 +1125,17 @@ func GetMonitoringResults(db *database.DB) http.HandlerFunc {
 }
 
 // GetSiteHistoryHandler - получение истории проверок сайта
+// @Summary История проверок сайта
+// @Description Возвращает историю проверок конкретного сайта с детальной информацией о каждой проверке
+// @Tags sites
+// @Accept json
+// @Produce json
+// @Param id path int true "ID сайта"
+// @Param limit query int false "Количество записей" default(100)
+// @Success 200 {array} models.SiteHistory "История получена успешно"
+// @Failure 400 {object} ErrorResponse "Неверный ID сайта"
+// @Failure 500 {object} ErrorResponse "Ошибка получения истории"
+// @Router /sites/{id}/history [get]
 func GetSiteHistoryHandler(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)

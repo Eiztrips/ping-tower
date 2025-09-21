@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// CronScheduler - планировщик заданий в стиле cron
 type CronScheduler struct {
 	jobs     map[string]*Job
 	jobsMux  sync.RWMutex
@@ -20,7 +19,6 @@ type CronScheduler struct {
 	wg       sync.WaitGroup
 }
 
-// Job - задание для выполнения
 type Job struct {
 	ID          string
 	Name        string
@@ -36,7 +34,6 @@ type Job struct {
 	mutex       sync.Mutex
 }
 
-// Schedule - расписание в cron формате (упрощенный)
 type Schedule struct {
 	Minutes  []int // 0-59
 	Hours    []int // 0-23
