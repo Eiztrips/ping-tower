@@ -89,7 +89,7 @@ func main() {
 	err = cronScheduler.AddJob(
 		"global-check",
 		"Общая проверка всех сайтов",
-		"*/30 * * * *",  // Каждые 30 минут
+		"*/30 * * * *",
 		monitor.CreateGlobalMonitoringJob(checker),
 	)
 	if err != nil {

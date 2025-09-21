@@ -296,7 +296,6 @@ const metricsTemplate = `<!DOCTYPE html>
         let charts = {};
         
         function initializeCharts() {
-            // График времени отклика - используем реальные данные
             const responseTimeCtx = document.getElementById('responseTimeChart').getContext('2d');
             charts.responseTime = new Chart(responseTimeCtx, {
                 type: 'line',
@@ -324,7 +323,6 @@ const metricsTemplate = `<!DOCTYPE html>
                 }
             });
 
-            // Остальные графики инициализируем пустыми, будем загружать данные
             initializeEmptyCharts();
         }
 
@@ -417,22 +415,18 @@ const metricsTemplate = `<!DOCTYPE html>
             const timeRange = document.getElementById('timeRange').value;
             const siteId = document.getElementById('siteFilter').value;
             
-            // Обновляем основные статистики из реальной базы данных
             updateMainStats(timeRange, siteId);
             
-            // Обновляем графики с реальными данными
             if (siteId) {
                 updateSiteMetrics(siteId, timeRange);
             } else {
                 updateAllSitesMetrics(timeRange);
             }
             
-            // Проверяем SSL алерты
             checkSSLAlerts();
         }
 
         function updateMainStats(timeRange, siteId) {
-            // Используем реальные данные из базы
             const endpoint = '/api/dashboard/stats';
                 
             fetch(endpoint)
@@ -442,7 +436,6 @@ const metricsTemplate = `<!DOCTYPE html>
                     document.getElementById('avgResponseTime').textContent = Math.round(data.avg_response_time || 0) + 'мс';
                     document.getElementById('uptimePercent').textContent = (data.avg_uptime || 0).toFixed(1) + '%';
                     
-                    // Получаем дополнительные метрики
                     updateExtendedStats(siteId, timeRange);
                 })
                 .catch(error => {
@@ -456,7 +449,6 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function updateExtendedStats(siteId, timeRange) {
-            // Загружаем расширенные метрики с реальными данными
             fetch('/api/sites')
                 .then(response => response.json())
                 .then(sites => {
@@ -465,12 +457,10 @@ const metricsTemplate = `<!DOCTYPE html>
                     let dnsCount = 0;
                     
                     sites.forEach(site => {
-                        // Подсчитываем SSL проблемы
                         if (site.url.startsWith('https://') && !site.ssl_valid) {
                             sslIssues++;
                         }
                         
-                        // Подсчитываем среднее DNS время
                         if (site.dns_time > 0) {
                             totalDnsTime += site.dns_time;
                             dnsCount++;
@@ -485,7 +475,6 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function updateSiteMetrics(siteId, hours) {
-            // Загружаем метрики конкретного сайта
             fetch('/api/sites')
                 .then(response => response.json())
                 .then(sites => {
@@ -498,7 +487,6 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function updateAllSitesMetrics(hours) {
-            // Загружаем агрегированные метрики всех сайтов
             fetch('/api/sites')
                 .then(response => response.json())
                 .then(sites => {
@@ -508,16 +496,13 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function updateChartsWithSiteData(site) {
-            // Обновляем график времени отклика для конкретного сайта
             const responseData = generateTimeSeriesData(site);
             charts.responseTime.data = responseData.responseTime;
             charts.responseTime.update();
 
-            // Обновляем график DNS
             charts.dns.data = responseData.dns;
             charts.dns.update();
 
-            // Обновляем график доступности
             charts.uptime.data = {
                 labels: ['Онлайн', 'Оффлайн'],
                 datasets: [{
@@ -527,21 +512,16 @@ const metricsTemplate = `<!DOCTYPE html>
             };
             charts.uptime.update();
 
-            // Обновляем SSL график
             updateSSLChart([site]);
 
-            // Обновляем performance radar
             updatePerformanceChart(site);
 
-            // Обновляем график статус кодов
             updateStatusCodesChart([site]);
         }
 
         function updateChartsWithAllSitesData(sites) {
-            // Агрегированные данные всех сайтов
             const aggregated = aggregateSitesData(sites);
             
-            // Обновляем все графики агрегированными данными
             charts.responseTime.data = aggregated.responseTime;
             charts.responseTime.update();
 
@@ -557,18 +537,15 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function generateTimeSeriesData(site) {
-            // Генерируем временные данные на основе реальной информации о сайте
             const now = new Date();
             const timeLabels = [];
             const responseValues = [];
             const dnsValues = [];
             
-            // Создаем данные за последние 24 часа
             for (let i = 23; i >= 0; i--) {
                 const time = new Date(now.getTime() - i * 60 * 60 * 1000);
                 timeLabels.push(time);
                 
-                // Используем реальные значения с небольшой вариацией
                 const baseResponse = site.response_time_ms || 500;
                 const variation = Math.random() * 200 - 100;
                 responseValues.push(Math.max(50, baseResponse + variation));
@@ -602,7 +579,6 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function aggregateSitesData(sites) {
-            // Агрегируем данные всех сайтов
             let totalUp = 0;
             let totalDown = 0;
             let totalResponseTime = 0;
@@ -612,7 +588,6 @@ const metricsTemplate = `<!DOCTYPE html>
             const timeLabels = [];
             const aggregatedResponse = [];
             
-            // Создаем временные метки
             for (let i = 23; i >= 0; i--) {
                 timeLabels.push(new Date(now.getTime() - i * 60 * 60 * 1000));
             }
@@ -627,7 +602,6 @@ const metricsTemplate = `<!DOCTYPE html>
                 }
             });
             
-            // Генерируем агрегированные данные времени отклика
             const avgResponseTime = responseCount > 0 ? totalResponseTime / responseCount : 500;
             for (let i = 0; i < 24; i++) {
                 const variation = Math.random() * 100 - 50;
@@ -672,7 +646,6 @@ const metricsTemplate = `<!DOCTYPE html>
             sites.forEach(site => {
                 if (site.url.startsWith('https://')) {
                     if (site.ssl_valid) {
-                        // Проверяем, не истекает ли сертификат скоро
                         if (site.ssl_expiry) {
                             const expiry = new Date(site.ssl_expiry);
                             const now = new Date();
@@ -792,7 +765,6 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function calculateTotalChecks(stats) {
-            // Рассчитываем общее количество проверок на основе статистики
             return (stats.sites_up || 0) + (stats.sites_down || 0);
         }
 
@@ -813,7 +785,6 @@ const metricsTemplate = `<!DOCTYPE html>
                 })
                 .catch(error => {
                     console.error('Ошибка проверки SSL:', error);
-                    // Проверяем SSL напрямую из списка сайтов
                     fetch('/api/sites')
                         .then(response => response.json())
                         .then(sites => {
@@ -839,7 +810,6 @@ const metricsTemplate = `<!DOCTYPE html>
         }
 
         function showNotification(message, type) {
-            // Простая система уведомлений
             const notification = document.createElement('div');
             notification.style.cssText = 
                 'position: fixed; top: 20px; right: 20px; padding: 15px 20px; ' +
@@ -864,13 +834,11 @@ const metricsTemplate = `<!DOCTYPE html>
             }, 4000);
         }
 
-        // Инициализация
         document.addEventListener('DOMContentLoaded', function() {
             initializeCharts();
             loadSites();
             updateMetrics();
             
-            // Автообновление каждые 30 секунд
             setInterval(updateMetrics, 30000);
             
             showNotification('Система метрик загружена с реальными данными', 'success');

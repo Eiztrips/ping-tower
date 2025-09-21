@@ -20,7 +20,6 @@ func HandleGetHourlyMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if metricsService == nil {
-		// Return mock data when service not available
 		vars := mux.Vars(r)
 		siteIDStr := vars["id"]
 		hoursStr := r.URL.Query().Get("hours")
@@ -84,7 +83,6 @@ func HandleGetPerformanceSummary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if metricsService == nil {
-		// Return mock data
 		mockSummary := map[string]interface{}{
 			"site_id":            1,
 			"site_url":           "https://example.com",
@@ -139,7 +137,6 @@ func HandleGetSSLAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if metricsService == nil {
-		// Return mock SSL alerts
 		mockAlerts := map[string]interface{}{
 			"expiring_within_days": days,
 			"certificates": []map[string]interface{}{

@@ -55,9 +55,8 @@ type CheckResult struct {
 	Cookies       []string  `json:"cookies"`
 }
 
-// DefaultSiteConfig - базовая конфигурация для новых сайтов - сбор всех данных каждые 5 минут
 var DefaultSiteConfig = models.SiteConfig{
-	CheckInterval: 300, // 5 минут = 300 секунд
+	CheckInterval: 300,
 	Timeout: 30,
 	ExpectedStatus: 200,
 	FollowRedirects: true,
@@ -100,7 +99,6 @@ func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	}
 }
 
-// CheckAllSitesScheduled - метод для вызова из планировщика заданий
 func (c *Checker) CheckAllSitesScheduled() error {
 	log.Println("📅 Запуск запланированной проверки всех сайтов...")
 	
@@ -115,7 +113,6 @@ func (c *Checker) CheckAllSitesScheduled() error {
 	return nil
 }
 
-// CheckSiteScheduled - метод для проверки конкретного сайта по расписанию
 func (c *Checker) CheckSiteScheduled(siteID int, siteURL string) error {
 	log.Printf("📅 Запуск запланированной проверки сайта: %s", siteURL)
 	
@@ -213,7 +210,6 @@ func (c *Checker) checkAllSites() {
 	log.Printf("✅ Проверено активных сайтов: %d", sitesCount)
 }
 
-// CheckSiteWithConfig - публичный метод для проверки сайта с конфигурацией
 func (c *Checker) CheckSiteWithConfig(siteURL string, config *models.SiteConfig) CheckResult {
 	return c.checkSiteWithConfig(siteURL, config)
 }
@@ -238,29 +234,23 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		return result
 	}
 
-	// Создаем кастомный transport с детальным измерением времени
 	transport := &http.Transport{
 		TLSHandshakeTimeout: time.Duration(config.Timeout/3) * time.Second,
 	}
 	
-	// Переменные для измерения времени
 	var dnsStart, dnsEnd, connectStart, connectEnd, tlsStart, tlsEnd time.Time
 	
-	// Добавляем измерение DNS и TCP времени через trace
 	if config.CollectDNSTime || config.CollectConnectTime {
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			// DNS lookup начинается здесь
 			if config.CollectDNSTime {
 				dnsStart = time.Now()
 			}
 			
-			// Резолвим хост вручную для измерения DNS времени
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
 			}
 			
-			// Измеряем DNS lookup
 			ips, err := net.LookupIP(host)
 			if err != nil {
 				return nil, err
@@ -272,12 +262,10 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 				log.Printf("🔍 DNS lookup для %s: %dмс", siteURL, result.DNSTime)
 			}
 			
-			// Измеряем TCP соединение
 			if config.CollectConnectTime {
 				connectStart = time.Now()
 			}
 			
-			// Устанавливаем TCP соединение с первым IP
 			dialer := &net.Dialer{
 				Timeout: time.Duration(config.Timeout/3) * time.Second,
 			}
@@ -294,13 +282,11 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 		}
 	}
 	
-	// Добавляем измерение TLS времени для HTTPS
 	if config.CollectTLSTime && strings.HasPrefix(siteURL, "https://") {
 		originalDialTLS := transport.DialTLSContext
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			tlsStart = time.Now()
 			
-			// Если у нас уже есть кастомный DialContext, используем его для базового соединения
 			var baseConn net.Conn
 			var err error
 			
@@ -317,7 +303,6 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 				return nil, err
 			}
 			
-			// Выполняем TLS handshake
 			tlsConn := tls.Client(baseConn, &tls.Config{
 				ServerName: parsedURL.Hostname(),
 			})
@@ -334,8 +319,7 @@ func (c *Checker) checkSiteWithConfig(siteURL string, config *models.SiteConfig)
 			
 			return tlsConn, nil
 		}
-		
-		// Отключаем стандартный DialTLS если был переопределен
+
 		if originalDialTLS != nil {
 			transport.DialTLS = nil
 		}
@@ -572,7 +556,6 @@ func (c *Checker) findKeywords(content string) []string {
 	return keywords
 }
 
-// UpdateSiteStatus - публичный метод для обновления статуса сайта
 func (c *Checker) UpdateSiteStatus(site *Site, result CheckResult) {
 	modelSite := &models.Site{ID: site.ID, URL: site.URL}
 	c.updateSiteStatus(modelSite, result)
@@ -624,7 +607,6 @@ func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 	}
 }
 
-// SaveCheckHistory - публичный метод для сохранения истории проверок
 func (c *Checker) SaveCheckHistory(siteID int, result CheckResult) {
 	c.saveCheckHistory(siteID, result)
 }
@@ -742,14 +724,12 @@ func (c *Checker) checkSite(siteURL string, siteID int) CheckResult {
 var NotifySiteChecked func(string, CheckResult)
 var MetricsRecorder func(int, string, CheckResult, string)
 
-// CreateSiteMonitoringJob создает задание для мониторинга конкретного сайта
 func CreateSiteMonitoringJob(siteID int, siteURL string, checker *Checker) func() error {
 	return func() error {
 		return checker.CheckSiteScheduled(siteID, siteURL)
 	}
 }
 
-// CreateGlobalMonitoringJob создает задание для проверки всех сайтов
 func CreateGlobalMonitoringJob(checker *Checker) func() error {
 	return func() error {
 		return checker.CheckAllSitesScheduled()

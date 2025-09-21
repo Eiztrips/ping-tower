@@ -106,7 +106,6 @@ func (ch *ClickHouseDB) initializeSchema() error {
 		TTL timestamp_date + INTERVAL 3 MONTH  -- Уменьшено с 1 года до 3 месяцев
 		SETTINGS index_granularity = 8192`,
 
-		// Оптимизированные materialized views с меньшим количеством данных
 		`CREATE MATERIALIZED VIEW IF NOT EXISTS site_metrics_hourly
 		ENGINE = SummingMergeTree()
 		PARTITION BY toYYYYMM(hour)
@@ -432,7 +431,6 @@ func (ch *ClickHouseDB) GetExpiringSSLCertificates(days int) ([]map[string]inter
 	return results, nil
 }
 
-// Добавляем метод для очистки старых данных
 func (ch *ClickHouseDB) CleanupOldData() error {
 	ctx := context.Background()
 	

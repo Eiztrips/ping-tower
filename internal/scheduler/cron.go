@@ -35,14 +35,13 @@ type Job struct {
 }
 
 type Schedule struct {
-	Minutes  []int // 0-59
-	Hours    []int // 0-23
-	Days     []int // 1-31
-	Months   []int // 1-12
-	Weekdays []int // 0-6 (0=Sunday)
+	Minutes  []int
+	Hours    []int
+	Days     []int
+	Months   []int
+	Weekdays []int
 }
 
-// NewCronScheduler создает новый планировщик
 func NewCronScheduler() *CronScheduler {
 	return &CronScheduler{
 		jobs:     make(map[string]*Job),
@@ -50,7 +49,6 @@ func NewCronScheduler() *CronScheduler {
 	}
 }
 
-// Start запускает планировщик
 func (cs *CronScheduler) Start() error {
 	cs.jobsMux.Lock()
 	defer cs.jobsMux.Unlock()
@@ -69,7 +67,6 @@ func (cs *CronScheduler) Start() error {
 	return nil
 }
 
-// Stop останавливает планировщик
 func (cs *CronScheduler) Stop() {
 	cs.jobsMux.Lock()
 	if !cs.running {
@@ -85,7 +82,6 @@ func (cs *CronScheduler) Stop() {
 	log.Println("🛑 Cron планировщик остановлен")
 }
 
-// AddJob добавляет новое задание
 func (cs *CronScheduler) AddJob(id, name, cronExpr string, handler func() error) error {
 	schedule, err := ParseCronExpression(cronExpr)
 	if err != nil {
@@ -112,7 +108,6 @@ func (cs *CronScheduler) AddJob(id, name, cronExpr string, handler func() error)
 	return nil
 }
 
-// RemoveJob удаляет задание
 func (cs *CronScheduler) RemoveJob(id string) {
 	cs.jobsMux.Lock()
 	defer cs.jobsMux.Unlock()
@@ -123,7 +118,6 @@ func (cs *CronScheduler) RemoveJob(id string) {
 	}
 }
 
-// EnableJob включает задание
 func (cs *CronScheduler) EnableJob(id string) error {
 	cs.jobsMux.Lock()
 	defer cs.jobsMux.Unlock()
@@ -139,7 +133,6 @@ func (cs *CronScheduler) EnableJob(id string) error {
 	return nil
 }
 
-// DisableJob отключает задание
 func (cs *CronScheduler) DisableJob(id string) error {
 	cs.jobsMux.Lock()
 	defer cs.jobsMux.Unlock()
@@ -154,14 +147,12 @@ func (cs *CronScheduler) DisableJob(id string) error {
 	return nil
 }
 
-// GetJobs возвращает список всех заданий
 func (cs *CronScheduler) GetJobs() map[string]*Job {
 	cs.jobsMux.RLock()
 	defer cs.jobsMux.RUnlock()
 
 	result := make(map[string]*Job)
 	for id, job := range cs.jobs {
-		// Создаем копию для безопасности
 		jobCopy := *job
 		result[id] = &jobCopy
 	}
@@ -169,11 +160,10 @@ func (cs *CronScheduler) GetJobs() map[string]*Job {
 	return result
 }
 
-// runLoop основной цикл планировщика
 func (cs *CronScheduler) runLoop() {
 	defer cs.wg.Done()
 
-	ticker := time.NewTicker(1 * time.Second) // Проверяем каждую секунду
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	log.Println("🔄 Запущен основной цикл планировщика")
@@ -188,7 +178,6 @@ func (cs *CronScheduler) runLoop() {
 	}
 }
 
-// checkAndRunJobs проверяет и запускает задания по расписанию
 func (cs *CronScheduler) checkAndRunJobs(now time.Time) {
 	cs.jobsMux.RLock()
 	var jobsToRun []*Job
@@ -200,13 +189,11 @@ func (cs *CronScheduler) checkAndRunJobs(now time.Time) {
 	}
 	cs.jobsMux.RUnlock()
 
-	// Запускаем задания параллельно
 	for _, job := range jobsToRun {
 		go cs.runJob(job, now)
 	}
 }
 
-// runJob выполняет конкретное задание
 func (cs *CronScheduler) runJob(job *Job, now time.Time) {
 	job.mutex.Lock()
 	if job.Running {
@@ -222,7 +209,6 @@ func (cs *CronScheduler) runJob(job *Job, now time.Time) {
 	log.Printf("🚀 Запуск задания '%s' (%s)", job.Name, job.ID)
 	startTime := time.Now()
 
-	// Выполняем задание с таймаутом
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
@@ -250,30 +236,25 @@ func (cs *CronScheduler) runJob(job *Job, now time.Time) {
 		log.Printf("✅ Задание '%s' выполнено успешно за %v", job.Name, duration)
 	}
 
-	// Вычисляем следующий запуск
 	job.NextRun = cs.calculateNextRun(job.Schedule, now)
 	log.Printf("🕒 Следующий запуск задания '%s': %s", job.Name, job.NextRun.Format("2006-01-02 15:04:05"))
 	job.mutex.Unlock()
 }
 
-// calculateNextRun вычисляет время следующего запуска
 func (cs *CronScheduler) calculateNextRun(schedule *Schedule, from time.Time) time.Time {
-	// Начинаем с следующей минуты
+
 	next := from.Add(time.Minute).Truncate(time.Minute)
 
-	// Ищем следующее подходящее время в течение года
-	for i := 0; i < 366*24*60; i++ { // Максимум год поиска
+	for i := 0; i < 366*24*60; i++ {
 		if cs.matchesSchedule(schedule, next) {
 			return next
 		}
 		next = next.Add(time.Minute)
 	}
 
-	// Если не нашли, возвращаем через год
 	return from.Add(365 * 24 * time.Hour)
 }
 
-// matchesSchedule проверяет соответствие времени расписанию
 func (cs *CronScheduler) matchesSchedule(schedule *Schedule, t time.Time) bool {
 	minute := t.Minute()
 	hour := t.Hour()
@@ -300,10 +281,6 @@ func (cs *CronScheduler) matchesSchedule(schedule *Schedule, t time.Time) bool {
 	return true
 }
 
-// ParseCronExpression парсит cron выражение (упрощенный формат)
-// Формат: "минуты часы дни месяцы дни_недели"
-// Пример: "*/5 * * * *" - каждые 5 минут
-// Пример: "0 9-17 * * 1-5" - каждый час с 9 до 17 в будние дни
 func ParseCronExpression(expr string) (*Schedule, error) {
 	parts := strings.Fields(expr)
 	if len(parts) != 5 {
@@ -313,31 +290,26 @@ func ParseCronExpression(expr string) (*Schedule, error) {
 	schedule := &Schedule{}
 	var err error
 
-	// Минуты (0-59)
 	schedule.Minutes, err = parseField(parts[0], 0, 59)
 	if err != nil {
 		return nil, fmt.Errorf("invalid minutes: %w", err)
 	}
 
-	// Часы (0-23)
 	schedule.Hours, err = parseField(parts[1], 0, 23)
 	if err != nil {
 		return nil, fmt.Errorf("invalid hours: %w", err)
 	}
 
-	// Дни (1-31)
 	schedule.Days, err = parseField(parts[2], 1, 31)
 	if err != nil {
 		return nil, fmt.Errorf("invalid days: %w", err)
 	}
 
-	// Месяцы (1-12)
 	schedule.Months, err = parseField(parts[3], 1, 12)
 	if err != nil {
 		return nil, fmt.Errorf("invalid months: %w", err)
 	}
 
-	// Дни недели (0-6)
 	schedule.Weekdays, err = parseField(parts[4], 0, 6)
 	if err != nil {
 		return nil, fmt.Errorf("invalid weekdays: %w", err)
@@ -346,19 +318,16 @@ func ParseCronExpression(expr string) (*Schedule, error) {
 	return schedule, nil
 }
 
-// parseField парсит отдельное поле cron выражения
 func parseField(field string, min, max int) ([]int, error) {
 	if field == "*" {
-		return nil, nil // nil означает "все значения"
+		return nil, nil
 	}
 
 	var values []int
 
-	// Обработка списков через запятую
 	parts := strings.Split(field, ",")
 	for _, part := range parts {
 		if strings.Contains(part, "/") {
-			// Обработка step values (например, */5)
 			stepParts := strings.Split(part, "/")
 			if len(stepParts) != 2 {
 				return nil, fmt.Errorf("invalid step format: %s", part)
@@ -401,7 +370,6 @@ func parseField(field string, min, max int) ([]int, error) {
 				}
 			}
 		} else if strings.Contains(part, "-") {
-			// Обработка диапазонов (например, 9-17)
 			rangeParts := strings.Split(part, "-")
 			if len(rangeParts) != 2 {
 				return nil, fmt.Errorf("invalid range format: %s", part)
@@ -422,7 +390,6 @@ func parseField(field string, min, max int) ([]int, error) {
 				}
 			}
 		} else {
-			// Обработка отдельных значений
 			value, err := strconv.Atoi(part)
 			if err != nil {
 				return nil, err
@@ -433,14 +400,12 @@ func parseField(field string, min, max int) ([]int, error) {
 		}
 	}
 
-	// Удаляем дубликаты и сортируем
 	values = removeDuplicates(values)
 	sort.Ints(values)
 
 	return values, nil
 }
 
-// GetJobStatus возвращает подробную информацию о задании
 func (cs *CronScheduler) GetJobStatus(id string) map[string]interface{} {
 	cs.jobsMux.RLock()
 	defer cs.jobsMux.RUnlock()
@@ -473,8 +438,6 @@ func (cs *CronScheduler) GetJobStatus(id string) map[string]interface{} {
 
 	return status
 }
-
-// Вспомогательные функции
 
 func contains(slice []int, value int) bool {
 	for _, v := range slice {

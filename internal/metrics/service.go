@@ -21,12 +21,11 @@ type Service struct {
 	siteStates    map[int]SiteState
 	statesMutex   sync.RWMutex
 	
-	// Новые поля для контроля объема данных
-	lastMetrics   map[int]database.SiteMetric  // Последние метрики для дедубликации
+	lastMetrics   map[int]database.SiteMetric  
 	metricsMutex  sync.RWMutex
-	maxDailyRows  int64                        // Максимальное количество строк в день
-	dailyRowCount int64                        // Текущее количество строк за день
-	lastResetDate time.Time                    // Последняя дата сброса счетчика
+	maxDailyRows  int64                        
+	dailyRowCount int64                        
+	lastResetDate time.Time                    
 }
 
 type SiteState struct {
@@ -34,15 +33,15 @@ type SiteState struct {
 	DownSince        *time.Time
 	LastResponseTime int64
 	LastSSLExpiry    *time.Time
-	LastMetricSent   time.Time  // Для контроля частоты отправки
+	LastMetricSent   time.Time 
 }
 
 type Config struct {
 	ClickHouse      database.ClickHouseConfig
 	BatchSize       int
 	FlushInterval   time.Duration
-	MaxDailyRows    int64  // Максимум строк в день
-	MinMetricGap    time.Duration  // Минимальный интервал между метриками
+	MaxDailyRows    int64 
+	MinMetricGap    time.Duration  
 }
 
 func NewService(config Config, postgresDB *database.DB) (*Service, error) {
@@ -64,15 +63,14 @@ func NewService(config Config, postgresDB *database.DB) (*Service, error) {
 		lastResetDate: time.Now().Truncate(24 * time.Hour),
 	}
 
-	// Установить разумные значения по умолчанию
 	if config.BatchSize <= 0 {
-		service.batchSize = 50  // Уменьшено с 100
+		service.batchSize = 50
 	}
 	if config.FlushInterval <= 0 {
-		service.flushInterval = 30 * time.Second  // Увеличено с 10 секунд
+		service.flushInterval = 30 * time.Second
 	}
 	if config.MaxDailyRows <= 0 {
-		service.maxDailyRows = 50000  // Максимум 50k строк в день
+		service.maxDailyRows = 50000
 	}
 
 	service.startBatchProcessor()
@@ -102,25 +100,20 @@ func (s *Service) startBatchProcessor() {
 }
 
 func (s *Service) RecordCheckResult(siteID int, siteURL string, result monitor.CheckResult, checkType string) error {
-	// Проверяем дневной лимит
 	if !s.checkDailyLimit() {
 		log.Printf("⚠️ Daily row limit (%d) reached, skipping metric recording for site %d", s.maxDailyRows, siteID)
 		return nil
 	}
 
-	// Проверяем, нужно ли записывать метрику (дедубликация)
 	if !s.shouldRecordMetric(siteID, result) {
 		log.Printf("🔄 Skipping duplicate/unchanged metric for site %d (%s)", siteID, siteURL)
 		return nil
 	}
 
-	// Handle site state tracking
 	s.handleSiteStateChange(siteID, siteURL, result)
 
-	// Записываем метрику только если есть значимые изменения или прошло достаточно времени
 	metric := s.convertCheckResultToMetric(siteID, siteURL, result, checkType)
 	
-	// Сохраняем последнюю метрику для дедубликации
 	s.metricsMutex.Lock()
 	s.lastMetrics[siteID] = metric
 	s.metricsMutex.Unlock()
@@ -135,7 +128,6 @@ func (s *Service) RecordCheckResult(siteID int, siteURL string, result monitor.C
 		s.flushBuffer()
 	}
 
-	// Handle downtime events (только критические события)
 	if result.Status == "down" {
 		if err := s.recordDowntimeEvent(uint32(siteID), siteURL, result.Error, uint16(result.StatusCode)); err != nil {
 			log.Printf("⚠️ Failed to record downtime event: %v", err)
@@ -153,7 +145,6 @@ func (s *Service) RecordCheckResult(siteID int, siteURL string, result monitor.C
 		}
 	}
 
-	// Handle SSL certificate updates (только при изменениях)
 	if result.SSLExpiry != nil && result.SSLAlgorithm != "" {
 		s.statesMutex.RLock()
 		state := s.siteStates[siteID]
@@ -170,12 +161,10 @@ func (s *Service) RecordCheckResult(siteID int, siteURL string, result monitor.C
 	return nil
 }
 
-// Новый метод для проверки дневного лимита
 func (s *Service) checkDailyLimit() bool {
 	now := time.Now()
 	today := now.Truncate(24 * time.Hour)
 	
-	// Сброс счетчика если новый день
 	if today.After(s.lastResetDate) {
 		s.dailyRowCount = 0
 		s.lastResetDate = today
@@ -185,14 +174,13 @@ func (s *Service) checkDailyLimit() bool {
 	return s.dailyRowCount < s.maxDailyRows
 }
 
-// Новый метод для дедубликации метрик
 func (s *Service) shouldRecordMetric(siteID int, result monitor.CheckResult) bool {
 	s.metricsMutex.RLock()
 	lastMetric, exists := s.lastMetrics[siteID]
 	s.metricsMutex.RUnlock()
 	
 	if !exists {
-		return true  // Первая метрика для сайта
+		return true 
 	}
 	
 	now := time.Now()
@@ -202,30 +190,25 @@ func (s *Service) shouldRecordMetric(siteID int, result monitor.CheckResult) boo
 	timeSinceLastMetric := now.Sub(state.LastMetricSent)
 	s.statesMutex.RUnlock()
 	
-	// Всегда записываем если прошло более 30 минут
 	if timeSinceLastMetric > 30*time.Minute {
 		return true
 	}
 	
-	// Всегда записываем критические изменения
 	if result.Status != lastMetric.Status {
-		return true  // Изменение статуса
+		return true
 	}
 	
-	// Записываем если значительно изменилось время отклика (более 20%)
 	if lastMetric.ResponseTimeMs > 0 {
 		responseTimeDiff := float64(abs(int64(result.ResponseTime) - int64(lastMetric.ResponseTimeMs))) / float64(lastMetric.ResponseTimeMs)
-		if responseTimeDiff > 0.2 {  // Изменение более чем на 20%
+		if responseTimeDiff > 0.2 { 
 			return true
 		}
 	}
 	
-	// Записываем если изменился статус код
 	if uint16(result.StatusCode) != lastMetric.StatusCode {
 		return true
 	}
 	
-	// Пропускаем остальные метрики чтобы избежать дублирования
 	return false
 }
 
@@ -248,9 +231,8 @@ func (s *Service) handleSiteStateChange(siteID int, siteURL string, result monit
 	now := time.Now()
 	newState := currentState
 	newState.LastResponseTime = result.ResponseTime
-	newState.LastMetricSent = now  // Обновляем время последней метрики
+	newState.LastMetricSent = now 
 
-	// Handle status changes
 	if currentState.LastStatus != result.Status {
 		if result.Status == "down" {
 			newState.LastStatus = "down"
@@ -266,14 +248,12 @@ func (s *Service) handleSiteStateChange(siteID int, siteURL string, result monit
 		}
 	}
 
-	// Log slow response times (но без алертов)
-	if result.Status == "up" && result.ResponseTime > 10000 {  // 10 секунд
+	if result.Status == "up" && result.ResponseTime > 10000 {
 		if currentState.LastResponseTime == 0 || float64(abs(result.ResponseTime-currentState.LastResponseTime))/float64(currentState.LastResponseTime) > 0.5 {
 			log.Printf("⚠️ Very slow response time for %s: %dms", siteURL, result.ResponseTime)
 		}
 	}
 
-	// Update SSL expiry tracking
 	if result.SSLExpiry != nil {
 		newState.LastSSLExpiry = result.SSLExpiry
 	}
@@ -281,12 +261,11 @@ func (s *Service) handleSiteStateChange(siteID int, siteURL string, result monit
 	s.siteStates[siteID] = newState
 }
 
-// Обновленный метод для более компактного хранения метрик
 func (s *Service) convertCheckResultToMetric(siteID int, siteURL string, result monitor.CheckResult, checkType string) database.SiteMetric {
 	now := time.Now()
 	metric := database.SiteMetric{
 		Timestamp:     now,
-		TimestampDate: now.Truncate(time.Hour),  // Округляем до часа для лучшего партиционирования
+		TimestampDate: now.Truncate(time.Hour),
 		SiteID:        uint32(siteID),
 		SiteURL:       siteURL,
 		Status:        result.Status,
@@ -296,12 +275,10 @@ func (s *Service) convertCheckResultToMetric(siteID int, siteURL string, result 
 		ConfigVersion: 1,
 	}
 
-	// Записываем дополнительные метрики только при значительных изменениях
 	s.metricsMutex.RLock()
 	lastMetric, hasLast := s.lastMetrics[siteID]
 	s.metricsMutex.RUnlock()
 	
-	// Детальные метрики записываем только если значительно изменились или это первая запись
 	if !hasLast || s.hasSignificantChange(lastMetric, result) {
 		metric.ContentLength = uint64(result.ContentLength)
 		metric.DNSTimeMs = uint64(result.DNSTime)
@@ -330,7 +307,6 @@ func (s *Service) convertCheckResultToMetric(siteID int, siteURL string, result 
 		}
 	}
 
-	// Ошибки записываем только при изменении статуса
 	if !hasLast || lastMetric.Status != result.Status {
 		metric.ErrorMessage = result.Error
 	}
@@ -338,14 +314,11 @@ func (s *Service) convertCheckResultToMetric(siteID int, siteURL string, result 
 	return metric
 }
 
-// Новый метод для определения значительных изменений
 func (s *Service) hasSignificantChange(lastMetric database.SiteMetric, result monitor.CheckResult) bool {
-	// Изменение статуса всегда значимо
 	if lastMetric.Status != result.Status {
 		return true
 	}
 	
-	// Значительное изменение времени отклика (более 30%)
 	if lastMetric.ResponseTimeMs > 0 {
 		diff := float64(abs(int64(result.ResponseTime) - int64(lastMetric.ResponseTimeMs))) / float64(lastMetric.ResponseTimeMs)
 		if diff > 0.3 {
@@ -353,7 +326,6 @@ func (s *Service) hasSignificantChange(lastMetric database.SiteMetric, result mo
 		}
 	}
 	
-	// Изменение размера контента более чем на 10%
 	if lastMetric.ContentLength > 0 && result.ContentLength > 0 {
 		diff := float64(abs(int64(result.ContentLength) - int64(lastMetric.ContentLength))) / float64(lastMetric.ContentLength)
 		if diff > 0.1 {

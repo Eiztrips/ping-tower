@@ -850,7 +850,6 @@ const demoTemplate = `<!DOCTYPE html>
     </div>
 
     <script>
-        // Простая демонстрация обновлений
         function updateDemo() {
             const values = document.querySelectorAll('.stat-value');
             values.forEach(value => {
@@ -862,7 +861,6 @@ const demoTemplate = `<!DOCTYPE html>
             });
         }
         
-        // Обновляем значения каждые 3 секунды для демонстрации
         setInterval(updateDemo, 3000);
         
         function addDemoSites() {
@@ -955,7 +953,6 @@ const demoTemplate = `<!DOCTYPE html>
             }, 3000);
         }
         
-        // Auto-refresh every 30 seconds
         setInterval(function() {
             window.location.reload();
         }, 30000);
@@ -965,7 +962,6 @@ const demoTemplate = `<!DOCTYPE html>
 
 func DemoHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Собираем реальные данные из базы
 		data := DemoData{
 			Stats: DashboardStats{},
 			Sites: []models.Site{},
@@ -974,7 +970,6 @@ func DemoHandler() http.HandlerFunc {
 		}
 
 		if demoDatabase != nil {
-			// Получаем статистику
 			countQuery := `SELECT COUNT(*) FROM sites`
 			demoDatabase.QueryRow(countQuery).Scan(&data.Stats.TotalSites)
 			
@@ -989,7 +984,6 @@ func DemoHandler() http.HandlerFunc {
 				demoDatabase.QueryRow(statsQuery).Scan(&data.Stats.SitesUp, &data.Stats.SitesDown, &data.Stats.AvgUptime, &data.Stats.AvgResponseTime)
 			}
 
-			// Получаем сайты с конфигурациями
 			sites, err := demoDatabase.GetAllSites()
 			if err == nil {
 				for i, site := range sites {
@@ -1001,7 +995,6 @@ func DemoHandler() http.HandlerFunc {
 				data.Sites = sites
 			}
 
-			// Создаем демо cron jobs на основе реальных сайтов
 			for _, site := range data.Sites {
 				job := CronJob{
 					SiteURL:     site.URL,
@@ -1026,7 +1019,6 @@ func DemoHandler() http.HandlerFunc {
 			}
 		}
 
-		// Создаем демо-метрики
 		data.Metrics = map[string]interface{}{
 			"total_checks":      calculateTotalChecks(data.Sites),
 			"avg_dns":          calculateAvgDNS(data.Sites),
@@ -1036,7 +1028,6 @@ func DemoHandler() http.HandlerFunc {
 			"ssl_valid_percent": calculateSSLValidPercent(data.Sites),
 		}
 
-		// Создаем функции для шаблона
 		funcMap := template.FuncMap{
 			"timeAgo": timeAgo,
 			"divFloat": func(a, b int64) float64 {
@@ -1068,7 +1059,6 @@ func DemoHandler() http.HandlerFunc {
 	}
 }
 
-// Вспомогательные функции для расчета метрик
 func calculateTotalChecks(sites []models.Site) int {
 	total := 0
 	for _, site := range sites {
