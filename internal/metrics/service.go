@@ -5,6 +5,7 @@ import (
 	"log"
 	"ping-tower/internal/database"
 	"ping-tower/internal/monitor"
+	"ping-tower/internal/notifications"
 	"sync"
 	"time"
 )
@@ -12,6 +13,7 @@ import (
 type Service struct {
 	clickhouse    *database.ClickHouseDB
 	postgres      *database.DB
+	alertManager  *notifications.AlertManager
 	batchSize     int
 	flushInterval time.Duration
 	buffer        []database.SiteMetric
@@ -53,6 +55,7 @@ func NewService(config Config, postgresDB *database.DB) (*Service, error) {
 	service := &Service{
 		clickhouse:    clickhouseDB,
 		postgres:      postgresDB,
+		alertManager:  nil, // Will be set externally
 		batchSize:     config.BatchSize,
 		flushInterval: config.FlushInterval,
 		buffer:        make([]database.SiteMetric, 0, config.BatchSize),
@@ -78,6 +81,10 @@ func NewService(config Config, postgresDB *database.DB) (*Service, error) {
 		service.batchSize, service.flushInterval, service.maxDailyRows)
 
 	return service, nil
+}
+
+func (s *Service) SetAlertManager(alertManager *notifications.AlertManager) {
+	s.alertManager = alertManager
 }
 
 func (s *Service) startBatchProcessor() {
@@ -238,10 +245,12 @@ func (s *Service) handleSiteStateChange(siteID int, siteURL string, result monit
 			newState.LastStatus = "down"
 			newState.DownSince = &now
 			log.Printf("🔴 Site %s went DOWN", siteURL)
+			s.sendAlert(siteID, siteURL, result, "site_down")
 		} else if result.Status == "up" && currentState.LastStatus == "down" {
 			newState.LastStatus = "up"
 			newState.DownSince = nil
 			log.Printf("🟢 Site %s is back UP", siteURL)
+			s.sendAlert(siteID, siteURL, result, "site_up")
 		} else if result.Status == "up" {
 			newState.LastStatus = "up"
 			newState.DownSince = nil
@@ -507,4 +516,53 @@ func (s *Service) Close() error {
 	}
 
 	return nil
+}
+
+func (s *Service) sendAlert(siteID int, siteURL string, result monitor.CheckResult, alertType string) {
+	if s.alertManager == nil {
+		return
+	}
+
+	// Конвертируем monitor.CheckResult в notifications.CheckResult
+	notificationResult := notifications.CheckResult{
+		Status:        result.Status,
+		StatusCode:    result.StatusCode,
+		ResponseTime:  result.ResponseTime,
+		ContentLength: result.ContentLength,
+		SSLValid:      result.SSLValid,
+		SSLExpiry:     result.SSLExpiry,
+		Error:         result.Error,
+		DNSTime:       result.DNSTime,
+		ConnectTime:   result.ConnectTime,
+		TLSTime:       result.TLSTime,
+		TTFB:          result.TTFB,
+		ContentHash:   result.ContentHash,
+		RedirectCount: result.RedirectCount,
+		FinalURL:      result.FinalURL,
+		Headers:       result.Headers,
+		Keywords:      result.Keywords,
+		SSLKeyLength:  result.SSLKeyLength,
+		SSLAlgorithm:  result.SSLAlgorithm,
+		SSLIssuer:     result.SSLIssuer,
+		ServerType:    result.ServerType,
+		PoweredBy:     result.PoweredBy,
+		ContentType:   result.ContentType,
+		CacheControl:  result.CacheControl,
+		Cookies:       result.Cookies,
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ Паника при отправке алерта из metrics для %s: %v", siteURL, r)
+			}
+		}()
+
+		err := s.alertManager.SendAlert(siteID, siteURL, notificationResult, alertType)
+		if err != nil {
+			log.Printf("❌ Ошибка отправки алерта из metrics для %s: %v", siteURL, err)
+		} else {
+			log.Printf("📧 Алерт отправлен из metrics для %s (тип: %s)", siteURL, alertType)
+		}
+	}()
 }

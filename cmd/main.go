@@ -82,6 +82,12 @@ func main() {
 
 	// Try to load global configuration from database
 	globalAlertConfig, err := db.GetAlertConfig("global")
+	log.Printf("🔍 DEBUG: GetAlertConfig('global') - err=%v", err)
+	if err == nil {
+		log.Printf("🔍 DEBUG: Global config loaded - Enabled=%v, EmailEnabled=%v, TelegramEnabled=%v",
+			globalAlertConfig.Enabled, globalAlertConfig.EmailEnabled, globalAlertConfig.TelegramEnabled)
+	}
+
 	if err == nil && globalAlertConfig.Enabled {
 		// Convert database config to notifications config
 		dbAlertsConfig := convertDBToNotificationsConfig(globalAlertConfig)
@@ -98,7 +104,24 @@ func main() {
 			log.Println("📱 Telegram оповещения включены")
 		}
 	} else if globalAlertManager == nil {
-		log.Println("🔕 Система оповещений отключена")
+		if err != nil {
+			log.Printf("🔕 Система оповещений отключена - ошибка загрузки конфигурации: %v", err)
+		} else if !globalAlertConfig.Enabled {
+			log.Println("🔕 Система оповещений отключена - globalAlertConfig.Enabled = false")
+		} else {
+			log.Println("🔕 Система оповещений отключена")
+		}
+	}
+
+	// Устанавливаем AlertManager в checker и metrics service
+	if globalAlertManager != nil {
+		checker.SetAlertManager(globalAlertManager)
+		log.Println("✅ AlertManager установлен в checker")
+
+		if metricsService != nil {
+			metricsService.SetAlertManager(globalAlertManager)
+			log.Println("✅ AlertManager установлен в metrics service")
+		}
 	}
 
 	if metricsService != nil {
@@ -163,7 +186,35 @@ func main() {
 					siteID = site.ID
 				}
 
-				err := alertManager.SendAlert(siteID, siteURL, result, alertType)
+				// Конвертируем result в формат notifications
+				notificationResult := notifications.CheckResult{
+					Status:        result.Status,
+					StatusCode:    result.StatusCode,
+					ResponseTime:  result.ResponseTime,
+					ContentLength: result.ContentLength,
+					SSLValid:      result.SSLValid,
+					SSLExpiry:     result.SSLExpiry,
+					Error:         result.Error,
+					DNSTime:       result.DNSTime,
+					ConnectTime:   result.ConnectTime,
+					TLSTime:       result.TLSTime,
+					TTFB:          result.TTFB,
+					ContentHash:   result.ContentHash,
+					RedirectCount: result.RedirectCount,
+					FinalURL:      result.FinalURL,
+					Headers:       result.Headers,
+					Keywords:      result.Keywords,
+					SSLKeyLength:  result.SSLKeyLength,
+					SSLAlgorithm:  result.SSLAlgorithm,
+					SSLIssuer:     result.SSLIssuer,
+					ServerType:    result.ServerType,
+					PoweredBy:     result.PoweredBy,
+					ContentType:   result.ContentType,
+					CacheControl:  result.CacheControl,
+					Cookies:       result.Cookies,
+				}
+
+				err := alertManager.SendAlert(siteID, siteURL, notificationResult, alertType)
 				if err != nil {
 					log.Printf("⚠️ Ошибка отправки оповещения для %s: %v", siteURL, err)
 

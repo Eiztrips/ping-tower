@@ -4,30 +4,58 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/smtp"
 	"strings"
 	"time"
 
-	"site-monitor/internal/config"
-	"site-monitor/internal/monitor"
+	"ping-tower/internal/config"
 )
 
 type AlertManager struct {
 	config *config.AlertsConfig
 }
 
+// CheckResult represents the result of a site check for alerting purposes
+type CheckResult struct {
+	Status        string
+	StatusCode    int
+	ResponseTime  int64
+	ContentLength int64
+	SSLValid      bool
+	SSLExpiry     *time.Time
+	Error         string
+	DNSTime       int64
+	ConnectTime   int64
+	TLSTime       int64
+	TTFB          int64
+	ContentHash   string
+	RedirectCount int
+	FinalURL      string
+	Headers       map[string]string
+	Keywords      []string
+	SSLKeyLength  int
+	SSLAlgorithm  string
+	SSLIssuer     string
+	ServerType    string
+	PoweredBy     string
+	ContentType   string
+	CacheControl  string
+	Cookies       []string
+}
+
 type AlertData struct {
-	SiteURL      string                `json:"site_url"`
-	SiteID       int                   `json:"site_id"`
-	Status       string                `json:"status"`
-	StatusCode   int                   `json:"status_code"`
-	ResponseTime int64                 `json:"response_time"`
-	Error        string                `json:"error,omitempty"`
-	Timestamp    time.Time             `json:"timestamp"`
-	AlertType    string                `json:"alert_type"`
-	CheckResult  *monitor.CheckResult  `json:"check_result,omitempty"`
+	SiteURL      string       `json:"site_url"`
+	SiteID       int          `json:"site_id"`
+	Status       string       `json:"status"`
+	StatusCode   int          `json:"status_code"`
+	ResponseTime int64        `json:"response_time"`
+	Error        string       `json:"error,omitempty"`
+	Timestamp    time.Time    `json:"timestamp"`
+	AlertType    string       `json:"alert_type"`
+	CheckResult  *CheckResult `json:"check_result,omitempty"`
 }
 
 func NewAlertManager(alertsConfig *config.AlertsConfig) *AlertManager {
@@ -36,7 +64,7 @@ func NewAlertManager(alertsConfig *config.AlertsConfig) *AlertManager {
 	}
 }
 
-func (am *AlertManager) SendAlert(siteID int, siteURL string, result monitor.CheckResult, alertType string) error {
+func (am *AlertManager) SendAlert(siteID int, siteURL string, result CheckResult, alertType string) error {
 	if !am.config.Enabled {
 		log.Println("🔕 Алерты отключены в конфигурации")
 		return nil
@@ -186,7 +214,12 @@ func (am *AlertManager) sendWebhookAlert(alertData AlertData) error {
 }
 
 func (am *AlertManager) sendTelegramAlert(alertData AlertData) error {
+	log.Printf("🔍 DEBUG Telegram: BotToken='%s', ChatID='%s', Enabled=%v",
+		am.config.Telegram.BotToken, am.config.Telegram.ChatID, am.config.Telegram.Enabled)
+
 	if am.config.Telegram.BotToken == "" || am.config.Telegram.ChatID == "" {
+		log.Printf("❌ Telegram config incomplete: BotToken empty=%v, ChatID empty=%v",
+			am.config.Telegram.BotToken == "", am.config.Telegram.ChatID == "")
 		return fmt.Errorf("telegram configuration incomplete")
 	}
 
@@ -195,29 +228,28 @@ func (am *AlertManager) sendTelegramAlert(alertData AlertData) error {
 		statusEmoji = "🟢"
 	}
 
-	message := fmt.Sprintf(`
-%s *Site Monitor Alert*
+	message := fmt.Sprintf(`%s Site Monitor Alert
 
-🌐 *Site:* %s
-📊 *Status:* %s
-⏱️ *Response Time:* %dms
-🔢 *Status Code:* %d
-⏰ *Time:* %s
-🔍 *Check Type:* %s
-`, statusEmoji, alertData.SiteURL, strings.ToUpper(alertData.Status),
+🌐 Site: %s
+📊 Status: %s
+⏱️ Response Time: %dms
+🔢 Status Code: %d
+⏰ Time: %s
+🔍 Check Type: %s`,
+		statusEmoji, alertData.SiteURL, strings.ToUpper(alertData.Status),
 		alertData.ResponseTime, alertData.StatusCode,
 		alertData.Timestamp.Format("2006-01-02 15:04:05"), alertData.AlertType)
 
 	if alertData.Error != "" {
-		message += fmt.Sprintf("\n❌ *Error:* %s", alertData.Error)
+		message += fmt.Sprintf("\n\n❌ Error: %s", alertData.Error)
 	}
 
 	telegramURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", am.config.Telegram.BotToken)
 
 	payload := map[string]interface{}{
-		"chat_id":    am.config.Telegram.ChatID,
-		"text":       message,
-		"parse_mode": "Markdown",
+		"chat_id": am.config.Telegram.ChatID,
+		"text":    message,
+		// Убираем parse_mode чтобы избежать проблем с экранированием
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -225,14 +257,23 @@ func (am *AlertManager) sendTelegramAlert(alertData AlertData) error {
 		return fmt.Errorf("failed to marshal telegram payload: %v", err)
 	}
 
+	log.Printf("📱 Отправка Telegram сообщения: URL=%s, ChatID=%s", telegramURL, am.config.Telegram.ChatID)
+	log.Printf("📱 Сообщение: %s", string(jsonData))
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(telegramURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
+		log.Printf("❌ Ошибка HTTP запроса к Telegram: %v", err)
 		return fmt.Errorf("failed to send telegram message: %v", err)
 	}
 	defer resp.Body.Close()
 
+	// Читаем ответ для отладки
+	respBody, _ := io.ReadAll(resp.Body)
+	log.Printf("📱 Telegram ответ: status=%d, body=%s", resp.StatusCode, string(respBody))
+
 	if resp.StatusCode != 200 {
+		log.Printf("❌ Telegram API вернул статус %d: %s", resp.StatusCode, string(respBody))
 		return fmt.Errorf("telegram API returned status code: %d", resp.StatusCode)
 	}
 
@@ -267,11 +308,37 @@ func NewNotifier(smtpServer, port, username, password, from string, to []string)
 
 func (n *Notifier) SendNotification(siteURL string) error {
 	// Convert legacy call to new alert system
-	result := monitor.CheckResult{
+	result := CheckResult{
 		Status:     "down",
 		StatusCode: 0,
 		Error:      "Site is down",
 	}
 
 	return n.alertManager.SendAlert(0, siteURL, result, "legacy")
+}
+
+// escapeMarkdown экранирует специальные символы для Telegram Markdown
+func escapeMarkdown(text string) string {
+	// Заменяем специальные символы Markdown
+	replacer := strings.NewReplacer(
+		"_", "\\_",
+		"*", "\\*",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"~", "\\~",
+		"`", "\\`",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"=", "\\=",
+		"|", "\\|",
+		"{", "\\{",
+		"}", "\\}",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(text)
 }

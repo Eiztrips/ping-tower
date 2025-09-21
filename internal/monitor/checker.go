@@ -17,12 +17,14 @@ import (
 
 	"ping-tower/internal/models"
 	"ping-tower/internal/database"
+	"ping-tower/internal/notifications"
 	_ "github.com/lib/pq"
 )
 
 type Checker struct {
-	db       *database.DB
-	client   *http.Client
+	db           *database.DB
+	client       *http.Client
+	alertManager *notifications.AlertManager
 }
 
 type CheckResult struct {
@@ -94,9 +96,35 @@ func NewChecker(db *database.DB, interval time.Duration) *Checker {
 	}
 
 	return &Checker{
-		db:     db,
-		client: client,
+		db:           db,
+		client:       client,
+		alertManager: nil, // Will be set externally
 	}
+}
+
+func NewCheckerWithAlerts(db *database.DB, interval time.Duration, alertManager *notifications.AlertManager) *Checker {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 10 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: false,
+			},
+		},
+	}
+
+	return &Checker{
+		db:           db,
+		client:       client,
+		alertManager: alertManager,
+	}
+}
+
+func (c *Checker) SetAlertManager(alertManager *notifications.AlertManager) {
+	c.alertManager = alertManager
 }
 
 func (c *Checker) CheckAllSitesScheduled() error {
@@ -563,14 +591,22 @@ func (c *Checker) UpdateSiteStatus(site *Site, result CheckResult) {
 
 func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 	log.Printf("💾 Обновляем детальный статус сайта %s: %s", site.URL, result.Status)
-	
-	query := `UPDATE sites SET 
-                status = $1::varchar, 
-                status_code = $2, 
-                response_time = $3, 
-                content_length = $4, 
-                ssl_valid = $5, 
-                ssl_expiry = $6, 
+
+	// Получаем предыдущий статус сайта для сравнения
+	var previousStatus string
+	statusQuery := `SELECT COALESCE(status, '') FROM sites WHERE id = $1`
+	err := c.db.QueryRow(statusQuery, site.ID).Scan(&previousStatus)
+	if err != nil && err.Error() != "sql: no rows in result set" {
+		log.Printf("❌ Ошибка получения предыдущего статуса сайта %s: %v", site.URL, err)
+	}
+
+	query := `UPDATE sites SET
+                status = $1::varchar,
+                status_code = $2,
+                response_time = $3,
+                content_length = $4,
+                ssl_valid = $5,
+                ssl_expiry = $6,
                 last_error = $7,
                 dns_time = $8,
                 connect_time = $9,
@@ -591,7 +627,7 @@ func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
                 successful_checks = COALESCE(successful_checks, 0) + CASE WHEN $1::varchar = 'up' THEN 1 ELSE 0 END
               WHERE id = $22`
 
-	_, err := c.db.Exec(query,
+	_, err = c.db.Exec(query,
 		result.Status, result.StatusCode, result.ResponseTime, result.ContentLength,
 		result.SSLValid, result.SSLExpiry, result.Error,
 		result.DNSTime, result.ConnectTime, result.TLSTime, result.TTFB,
@@ -602,8 +638,80 @@ func (c *Checker) updateSiteStatus(site *models.Site, result CheckResult) {
 
 	if err != nil {
 		log.Printf("❌ Ошибка обновления детального статуса сайта %s: %v", site.URL, err)
+		return
+	}
+
+	log.Printf("✅ Детальный статус сайта %s успешно обновлен", site.URL)
+
+	// Отправляем алерт если статус изменился и настроен AlertManager
+	log.Printf("🔍 DEBUG: Проверка алертов для %s: alertManager=%v, previousStatus='%s', currentStatus='%s'",
+		site.URL, c.alertManager != nil, previousStatus, result.Status)
+
+	if c.alertManager != nil && previousStatus != "" && previousStatus != result.Status {
+		log.Printf("🚨 ОТПРАВЛЯЕМ АЛЕРТ для %s: %s -> %s", site.URL, previousStatus, result.Status)
+		go c.sendStatusChangeAlert(site, previousStatus, result)
+	} else if c.alertManager == nil {
+		log.Printf("❌ AlertManager не настроен для %s", site.URL)
+	} else if previousStatus == "" {
+		log.Printf("ℹ️ Первая проверка сайта %s, предыдущий статус неизвестен", site.URL)
+	} else if previousStatus == result.Status {
+		log.Printf("ℹ️ Статус сайта %s не изменился: %s", site.URL, result.Status)
+	}
+}
+
+func (c *Checker) sendStatusChangeAlert(site *models.Site, previousStatus string, result CheckResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ Паника при отправке алерта для %s: %v", site.URL, r)
+		}
+	}()
+
+	// Определяем тип алерта
+	alertType := "status_change"
+	if result.Status == "down" && previousStatus == "up" {
+		alertType = "site_down"
+		log.Printf("🚨 Сайт %s перешел в состояние DOWN (с %s на %s)", site.URL, previousStatus, result.Status)
+	} else if result.Status == "up" && previousStatus == "down" {
+		alertType = "site_up"
+		log.Printf("✅ Сайт %s восстановлен (с %s на %s)", site.URL, previousStatus, result.Status)
 	} else {
-		log.Printf("✅ Детальный статус сайта %s успешно обновлен", site.URL)
+		log.Printf("🔄 Статус сайта %s изменился: %s -> %s", site.URL, previousStatus, result.Status)
+	}
+
+	// Конвертируем CheckResult в формат для notifications
+	notificationResult := notifications.CheckResult{
+		Status:        result.Status,
+		StatusCode:    result.StatusCode,
+		ResponseTime:  result.ResponseTime,
+		ContentLength: result.ContentLength,
+		SSLValid:      result.SSLValid,
+		SSLExpiry:     result.SSLExpiry,
+		Error:         result.Error,
+		DNSTime:       result.DNSTime,
+		ConnectTime:   result.ConnectTime,
+		TLSTime:       result.TLSTime,
+		TTFB:          result.TTFB,
+		ContentHash:   result.ContentHash,
+		RedirectCount: result.RedirectCount,
+		FinalURL:      result.FinalURL,
+		Headers:       result.Headers,
+		Keywords:      result.Keywords,
+		SSLKeyLength:  result.SSLKeyLength,
+		SSLAlgorithm:  result.SSLAlgorithm,
+		SSLIssuer:     result.SSLIssuer,
+		ServerType:    result.ServerType,
+		PoweredBy:     result.PoweredBy,
+		ContentType:   result.ContentType,
+		CacheControl:  result.CacheControl,
+		Cookies:       result.Cookies,
+	}
+
+	// Отправляем алерт
+	err := c.alertManager.SendAlert(site.ID, site.URL, notificationResult, alertType)
+	if err != nil {
+		log.Printf("❌ Ошибка отправки алерта для %s: %v", site.URL, err)
+	} else {
+		log.Printf("📧 Алерт отправлен для %s (тип: %s)", site.URL, alertType)
 	}
 }
 

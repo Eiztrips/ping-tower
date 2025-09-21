@@ -168,14 +168,14 @@ func HandleGetSSLAlertsFromDB(db *database.DB) http.HandlerFunc {
 
 		// Получаем сайты с истекающими SSL сертификатами из PostgreSQL
 		query := `SELECT id, url, ssl_issuer, ssl_expiry, ssl_valid
-				  FROM sites 
-				  WHERE url LIKE 'https://%' 
-				  AND ssl_expiry IS NOT NULL 
-				  AND ssl_expiry > NOW() 
-				  AND ssl_expiry <= NOW() + INTERVAL '%d days'
+				  FROM sites
+				  WHERE url LIKE 'https://%'
+				  AND ssl_expiry IS NOT NULL
+				  AND ssl_expiry > NOW()
+				  AND ssl_expiry <= NOW() + ($1 || ' days')::INTERVAL
 				  ORDER BY ssl_expiry ASC`
 
-		rows, err := db.Query(fmt.Sprintf(query, days))
+		rows, err := db.Query(query, days)
 		if err != nil {
 			log.Printf("Ошибка запроса SSL алертов: %v", err)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1526,7 +1526,7 @@ func TestAlertHandler(db *database.DB) http.HandlerFunc {
 		}
 
 		// Create test result
-		testResult := monitor.CheckResult{
+		testResult := notifications.CheckResult{
 			Status:       "down",
 			StatusCode:   200,
 			ResponseTime: 150,
